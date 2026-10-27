@@ -118,6 +118,12 @@ CHAT_RATE_LIMIT_WINDOW = int(os.environ.get("CHAT_RATE_LIMIT_WINDOW", "5"))
 ROOM_PING_INTERVAL = int(os.environ.get("ROOM_PING_INTERVAL", "20"))
 ROOM_PING_TIMEOUT = int(os.environ.get("ROOM_PING_TIMEOUT", "60"))
 
+# Обработка фраз (ТЗ 5.7): глобальный предел одновременных тяжёлых задач и
+# размер очереди одной комнаты. Очереди живут в памяти процесса, поэтому в
+# проде запускается один процесс uvicorn.
+ASR_MAX_CONCURRENCY = max(1, int(os.environ.get("ASR_MAX_CONCURRENCY", os.cpu_count() or 1)))
+ROOM_QUEUE_MAX = max(1, int(os.environ.get("ROOM_QUEUE_MAX", "5")))
+
 # Загрузка клипа жеста (формат — docs/spec/clip-format.md). Ограничения
 # защищают хранилище от битых и слишком больших файлов.
 CLIP_VERSION = int(os.environ.get("CLIP_VERSION", "1"))

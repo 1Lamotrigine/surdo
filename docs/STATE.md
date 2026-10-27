@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**E1 — сервис конвейера: готов.**
+**E2 — приём текста и фоновая очередь: готов.**
 
 ## Что готово
 
@@ -15,7 +15,7 @@
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
   `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`, `AVATAR_MODEL_URL`,
   `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
-  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`.
+  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -417,6 +417,23 @@
   очереди идёт в одной транзакции. `asr_ms` принимается снаружи для будущего E2,
   пустой текст и текст длиннее 2000 символов отклоняются
   `UtteranceValidationError`.
+- **Фоновая очередь фраз (E2):** `pipeline/queue.py` — `PipelineQueue` держит
+  `asyncio.Queue` и одну задачу-обработчик на комнату (порядок фраз строго
+  сохраняется) и глобальный `asyncio.Semaphore` на `ASR_MAX_CONCURRENCY`.
+  Очередь комнаты ограничена `ROOM_QUEUE_MAX`; при переполнении самое старое
+  ожидающее задание снимается (`RoomQueueFullError`). Цикл событий очереди живёт
+  в отдельном daemon-потоке, поэтому синхронное Django-вью ставит задание и не
+  ждёт обработки; сама обработка идёт в `asyncio.to_thread`. `submit` возвращает
+  `Future` с `Utterance` (для тестов и диагностики), ошибка одного задания не
+  останавливает воркер комнаты. `wait_for_idle`/`close` — для тестов и остановки.
+- **Приём текста (E2):** `POST /api/rooms/<code>/text/` →
+  `pipeline.api.text_api`. Принимает JSON `{"text": "..."}` или поле формы
+  `text`, нормализует его и ставит в очередь с `started_at`; ответ **202**
+  `{"status": "accepted"}`. Аноним — 401, не владелец комнаты (даже другой
+  преподаватель/гость) — 403, закрытая или неизвестная комната — 404, пустой или
+  слишком длинный текст — 400. Администратор может отправлять текст в любую
+  открытую комнату. Запрос не создаёт `Utterance` синхронно и не блокирует
+  WebSocket-чат.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -443,6 +460,7 @@
 | WebSocket комнаты | `WS /ws/rooms/<code>/` → `rooms.consumers.RoomConsumer` |
 | Панель преподавателя | `GET /rooms/<code>/live/` → `rooms.views.room_live` |
 | История для переподключения | `GET /api/rooms/<code>/history/?after_seq=&after_message_id=` → `rooms.api.chat_history_api` |
+| Приём текста фразы (преподаватель) | `POST /api/rooms/<code>/text/` → `pipeline.api.text_api` |
 | Файл клипа жеста (ETag/304) | `GET /media/clips/<id>.json.gz` → `dictionary.views.clip_file` |
 | Список словаря (публичный) | `GET /api/dictionary/?lang=&status=` → `dictionary.api.dictionary_api` |
 | Создание жеста (редактор) | `POST /api/signs/` → `dictionary.api.create_sign_api` |
@@ -596,6 +614,16 @@
   (счётчик по каждому вхождению, без дублей в объекте глосс), только проверенные
   жесты, язык комнаты и явный язык, отказ на пустой/длинный текст и неизвестный
   язык.
+- `pipeline/tests/test_queue.py` (E2) — порядок фраз одной комнаты, параллельная
+  обработка разных комнат, глобальный предел `ASR_MAX_CONCURRENCY`, выброс
+  самого старого задания при переполнении `ROOM_QUEUE_MAX`, продолжение работы
+  после ошибки задания, `wait_for_idle`.
+- `pipeline/tests/test_api.py` (E2) — права на `POST .../text/` (401/403/404),
+  владелец и админ получают 202, нормализация текста, JSON и форма, пустой,
+  отсутствующий, длинный текст и битый JSON (400), закрытая/неизвестная комната,
+  отсутствие синхронного `Utterance`, ответ до завершения фоновой обработки.
+- `pipeline/tests/test_processing.py` (E2) — фоновое задание с настоящим
+  обработчиком создаёт `Utterance` с глоссами и `started_at`.
 - `services/tests/test_clips.py` — `FileClipStorage`: сохранение/чтение,
   создание каталогов, `exists`, `open`, `size`, `delete`, стабильность и
   чувствительность ETag, сборка URL.
@@ -1219,11 +1247,65 @@ utterance.as_event()
 - Объект глосс повторяет ТЗ 7.2, но без `utterance_id`: идентификатор фразы
   уже есть в `Utterance.as_event()` (`id`) и не дублируется в JSONField.
 
+## Проверка E2
+
+```bash
+make check          # ruff + tsc + vitest (250) + pytest (400) + vite build — зелёный
+```
+
+Автотесты проверяют права и ответ 202 (`pipeline/tests/test_api.py`), очередь
+(порядок, параллелизм, предел, переполнение — `pipeline/tests/test_queue.py`) и
+реальную фоновую запись `Utterance` (`pipeline/tests/test_processing.py`). Тест
+`test_request_does_not_wait_for_background_processing` держит обработчик
+заблокированным и подтверждает, что HTTP-ответ уже получен. Ручная проверка:
+
+```bash
+curl -i -X POST http://localhost/api/rooms/<код>/text/ \
+  -H 'Content-Type: application/json' \
+  -H 'X-CSRFToken: <токен>' \
+  --cookie 'sessionid=<сессия>' \
+  -d '{"text": "Учебник Иванов"}'
+
+# 202 {"status": "accepted"} — фраза сохранится в фоне и появится в Utterance
+```
+
+Очередь живёт в памяти процесса: в проде остаётся один процесс uvicorn
+(`--workers 1`). Пока нет рассылки `utterance` — это E3.
+
+## Решения E2
+
+- Очередь работает в отдельном daemon-потоке с собственным asyncio-циклом.
+  Django-вью синхронное, а цикл запроса (особенно в тестах) живёт только до
+  ответа: `asyncio.create_task` в нём был бы отменён, поэтому общий цикл
+  принадлежит очереди, а не запросу. HTTP-вью только делает
+  `call_soon_threadsafe`.
+- Один воркер на комнату берёт задания из `asyncio.Queue` строго по порядку;
+  глобальный семафор ограничивает число одновременно работающих обработчиков
+  (`ASR_MAX_CONCURRENCY`), как требует ТЗ 5.7. Разные комнаты не ждут друг
+  друга, если есть свободный слот.
+- Обработка (`create_utterance`) запускается через `asyncio.to_thread`: ORM не
+  выполняется в цикле событий, а будущие тяжёлые вызовы ASR/LLM встанут в тот же
+  слот семафора. `process_text_job` получает комнату по id уже в фоне, поэтому
+  между запросом и обработкой не держится объект модели.
+- Очередь комнаты ограничена `ROOM_QUEUE_MAX` (5): при переполнении снимается
+  самое старое **ожидающее** задание (текущее не прерывается), его `Future`
+  получает `RoomQueueFullError`, в лог идёт предупреждение. Показ предупреждения
+  преподавателю — E4/E5.
+- Эндпоинт отвечает 202 сразу после постановки в очередь и не ждёт `Future`.
+  Поэтому ответ не зависит от скорости глосс и не блокирует WebSocket-consumer,
+  который живёт в том же процессе.
+- `text` проверяется тем же `normalize_text`, что и сервис E1: пустой и слишком
+  длинный текст отклоняются синхронно с 400, а не попадают в очередь.
+- Права: только владелец комнаты или администратор. Посторонний преподаватель
+  получает 403, гость — тоже 403, аноним — 401. Проверка комнаты идёт после
+  аутентификации, чтобы не раскрывать существование закрытых комнат.
+
 ## Дальше
 
-**E1 готов.** Следующий — E2: `POST /api/rooms/<code>/text/` только для
-преподавателя комнаты, ответ 202 и фоновая обработка с ограничением
-параллелизма. Сервис `pipeline.services.create_utterance` уже принимает текст,
-`asr_ms` и `started_at`, поэтому эндпоинт остаётся тонким. Читать:
-`pipeline/services.py`, `rooms/permissions.py`, `rooms/consumers.py`,
-`docs/spec/api.md` (ТЗ 5.7, 7.4).
+**E2 готов.** Следующий — E3: рассылка `asr_text` и `utterance` в группу
+комнаты, а клиент студента должен ставить полученные глоссы в очередь клипов.
+Обработчик очереди (`pipeline/queue.py`) уже получает сохранённый `Utterance` и
+является естественным местом для `group_send`; клиент комнаты
+(`frontend/room-live.ts`) пока обрабатывает `utterance` только как уведомление.
+Читать: `pipeline/queue.py`, `rooms/consumers.py`, `docs/spec/ws-events.md`,
+`frontend/room-live.ts`.
