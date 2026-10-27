@@ -190,6 +190,16 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
     async def chat_message(self, event: dict) -> None:
         await self.send_json({"type": "chat_message", "message": event["message"]})
 
+    async def asr_text(self, event: dict) -> None:
+        """E3: распознанный текст показывается сразу, до глосс и клипов."""
+        await self.send_json({"type": "asr_text", "text": event.get("text", "")})
+
+    async def utterance(self, event: dict) -> None:
+        """E3: глоссы фразы и ссылки на клипы для очереди студента."""
+        await self.send_json(
+            {"type": "utterance", "utterance": event.get("utterance", {})}
+        )
+
     async def room_closed(self, event: dict) -> None:
         """Событие A10: комната закрыта преподавателем."""
         await self.send_json({"type": "room_closed"})

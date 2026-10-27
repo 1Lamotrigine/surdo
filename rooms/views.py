@@ -1,5 +1,6 @@
 """HTTP-представления комнат для преподавателя и студентов."""
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest
@@ -188,7 +189,7 @@ def room_join(request: HttpRequest, join_code: str):
 
 
 def room_student(request: HttpRequest, join_code: str):
-    """Страница комнаты для студента (аватар и субтитры появятся в блоке C/D)."""
+    """Страница комнаты для студента: аватар, клипы и субтитры (E3)."""
     room = find_open_room(join_code)
     if room is None:
         closed = find_room(join_code)
@@ -230,5 +231,6 @@ def room_student(request: HttpRequest, join_code: str):
             "room": room,
             "participant": participant,
             "display_name": participant.display_name if participant else name,
+            "avatar_model_url": settings.AVATAR_MODEL_URL,
         },
     )

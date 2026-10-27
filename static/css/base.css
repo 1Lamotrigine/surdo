@@ -275,6 +275,45 @@ main {
   color: var(--muted);
 }
 
+/* E3: сцена студента — аватар, живой текст и субтитры. */
+.student-room .student-stage {
+  display: grid;
+  gap: 0.75rem;
+  place-items: stretch;
+  padding: 1rem;
+  border-style: solid;
+  text-align: left;
+}
+
+.student-room .student-stage .avatar-stage {
+  max-height: none;
+}
+
+.student-room .student-stage .avatar-subtitles {
+  margin-top: 0;
+}
+
+.student-live-caption {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
+  background: #0b1220;
+  color: #f9fafb;
+  font-size: 1.9rem;
+  line-height: 1.5;
+}
+
+.student-live-caption[hidden] {
+  display: none;
+}
+
+.student-phrase-status {
+  min-height: 1.2em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .socket-status {
   display: inline-block;
   margin: 0.75rem 0 0;

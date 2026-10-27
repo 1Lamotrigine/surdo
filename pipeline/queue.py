@@ -28,6 +28,7 @@ from datetime import datetime
 
 from django.conf import settings
 
+from pipeline.events import broadcast_asr_text, broadcast_utterance
 from pipeline.models import Utterance
 from pipeline.services import create_utterance
 
@@ -56,17 +57,25 @@ class TextJob:
 
 
 def process_text_job(job: TextJob) -> Utterance:
-    """Обработать фразу в фоновом потоке: сохранить ``Utterance`` и глоссы."""
+    """Обработать фразу в фоновом потоке: сохранить ``Utterance`` и глоссы.
+
+    E3: сначала в комнату уходит распознанный текст (``asr_text``), затем —
+    сохранённая фраза с глоссами и ссылками на клипы (``utterance``). Рассылка
+    идёт до/после обработки, поэтому текст виден раньше глосс и аватара.
+    """
     from rooms.models import Room
 
+    broadcast_asr_text(job.room_id, job.text)
     room = Room.objects.get(pk=job.room_id)
-    return create_utterance(
+    utterance = create_utterance(
         room,
         job.text,
         lang=job.lang,
         asr_ms=job.asr_ms,
         started_at=job.started_at,
     )
+    broadcast_utterance(utterance)
+    return utterance
 
 
 class PipelineQueue:

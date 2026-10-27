@@ -4,13 +4,19 @@
 {% block title %}{{ room.title }} · ИИ-аватар сурдопереводчик{% endblock %}
 
 {% block content %}
-  <section class="student-room" data-room-live data-student-view data-join-code="{{ room.join_code }}">
+  <section
+    class="student-room"
+    data-room-live
+    data-student-view
+    data-join-code="{{ room.join_code }}"
+    data-avatar-model-url="{{ avatar_model_url }}"
+  >
     <header class="student-head">
       <p class="eyebrow">Комната {{ room.join_code }}</p>
       <h1>{{ room.title }}</h1>
       <p class="lead">
-        Вы вошли как <strong>{{ display_name }}</strong>. Аватар и субтитры
-        появятся здесь на следующих этапах.
+        Вы вошли как <strong>{{ display_name }}</strong>. Распознанный текст
+        появляется сразу, а аватар показывает жесты.
       </p>
       <p class="socket-status" data-socket-status data-state="loading" aria-live="polite">
         Подключение…
@@ -24,9 +30,15 @@
     </header>
 
     <div class="student-stage" aria-label="Область аватара и субтитров">
-      <p class="student-placeholder">
-        Аватар и субтитры появятся после подключения блоков C и D.
-        Пока можно держать эту страницу открытой.
+      <div class="avatar-stage" data-room-avatar-stage></div>
+      <p class="student-live-caption" data-room-live-caption hidden aria-live="polite"></p>
+      <div
+        class="avatar-subtitles subtitle-size-large subtitle-theme-dark"
+        data-room-subtitles
+        aria-live="polite"
+      ></div>
+      <p class="student-phrase-status" data-room-phrase-status aria-live="polite">
+        Ожидание фразы…
       </p>
     </div>
 

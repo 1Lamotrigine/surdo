@@ -12,6 +12,7 @@ import {
   notificationKindFor,
   type NotificationKind,
 } from "./notifications";
+import type { UtteranceEvent } from "./room-clips";
 
 type PresenceEntry = {
   name: string;
@@ -33,7 +34,8 @@ type ServerEvent =
   | { type: "chat_history"; messages: ChatMessage[] }
   | { type: "chat_message"; message: ChatMessage }
   | { type: "chat_error"; error: string; retry_after?: number }
-  | { type: "utterance" }
+  | { type: "asr_text"; text: string }
+  | { type: "utterance"; utterance: UtteranceEvent }
   | { type: "pong" }
   | { type: "room_closed" }
   | { type: "participant_removed" }
@@ -76,6 +78,7 @@ export function setupRoomLive(root: HTMLElement): void {
   const isTeacherView = root.hasAttribute("data-teacher-view");
   const isStudentView = root.hasAttribute("data-student-view");
   const wakeLockStatus = root.querySelector<HTMLElement>("[data-wake-lock-status]");
+  const liveCaption = root.querySelector<HTMLElement>("[data-room-live-caption]");
   const removeParticipantUrl = root.dataset.removeParticipantUrl;
   const csrfToken = root.dataset.csrfToken;
   let pingTimer: number | undefined;
@@ -84,6 +87,38 @@ export function setupRoomLive(root: HTMLElement): void {
   let lastSeq = 0;
   let reconnectAttempt = 0;
   let closed = false;
+
+  type PhraseController = {
+    enqueue(utterance: UtteranceEvent): boolean;
+    dispose(): void;
+  };
+  let phrasePlayer: Promise<PhraseController> | null = null;
+
+  /**
+   * Тяжёлый аватар/плеер грузится только на странице студента и только когда
+   * пришла первая фраза. До этого субтитры `asr_text` показывает room-live.
+   */
+  const getPhrasePlayer = (): Promise<PhraseController> | null => {
+    if (!isStudentView || !root.querySelector("[data-room-avatar-stage]")) return null;
+    phrasePlayer ??= import("./room-phrase")
+      .then((module) => module.createRoomPhrasePlayer(root))
+      .catch((error: unknown) => {
+        phrasePlayer = null;
+        setStatus("Не удалось загрузить аватар: показываем субтитры.", "error");
+        throw error;
+      });
+    return phrasePlayer;
+  };
+
+  const showLiveCaption = (text: string): void => {
+    if (!liveCaption) return;
+    liveCaption.textContent = text;
+    liveCaption.hidden = false;
+  };
+
+  const hideLiveCaption = (): void => {
+    if (liveCaption) liveCaption.hidden = true;
+  };
 
   // C8: уведомления и Wake Lock только на странице студента, не в панели.
   const notifier = isStudentView ? new ScreenNotifier(root) : null;
@@ -222,11 +257,20 @@ export function setupRoomLive(root: HTMLElement): void {
       if (!response.ok) return;
       const data = (await response.json()) as {
         messages?: ChatMessage[];
-        utterances?: { seq: number }[];
+        utterances?: UtteranceEvent[];
       };
       for (const message of data.messages ?? []) appendMessage(message);
-      for (const utterance of data.utterances ?? []) {
-        if (utterance.seq > lastSeq) lastSeq = utterance.seq;
+      const missed = (data.utterances ?? [])
+        .filter((utterance) => utterance.seq > lastSeq)
+        .sort((left, right) => left.seq - right.seq);
+      for (const utterance of missed) {
+        lastSeq = utterance.seq;
+        getPhrasePlayer()
+          ?.then((player) => {
+            player.enqueue(utterance);
+            hideLiveCaption();
+          })
+          .catch(() => undefined);
       }
     } catch {
       // Не критично: следующее переподключение попробует снова.
@@ -268,8 +312,22 @@ export function setupRoomLive(root: HTMLElement): void {
             isStudentView,
           ),
         );
+      } else if (isEvent(payload, "asr_text")) {
+        showLiveCaption(payload.text);
       } else if (isEvent(payload, "utterance")) {
-        notifyStudent(notificationKindFor({ type: "utterance" }, isStudentView));
+        const utterance = payload.utterance;
+        if (utterance && utterance.seq > lastSeq) {
+          lastSeq = utterance.seq;
+          notifyStudent(notificationKindFor({ type: "utterance" }, isStudentView));
+          getPhrasePlayer()
+            ?.then((player) => {
+              player.enqueue(utterance);
+              hideLiveCaption();
+            })
+            .catch(() => undefined);
+        } else {
+          hideLiveCaption();
+        }
       } else if (isEvent(payload, "chat_error") && chatHint) {
         chatHint.textContent =
           payload.error === "rate_limited"
@@ -320,6 +378,8 @@ export function setupRoomLive(root: HTMLElement): void {
       window.clearInterval(pingTimer);
       void wakeLock?.disable();
       notifier?.dispose();
+      phrasePlayer?.then((player) => player.dispose()).catch(() => undefined);
+      phrasePlayer = null;
     },
     { once: true },
   );
