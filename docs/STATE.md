@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**C2 — декодер формата клипа: готов.**
+**C3 — ретаргет landmarks на кости VRM: готов.**
 
 ## Что готово
 
@@ -231,6 +231,32 @@
   субнормальные, NaN/бесконечность), base64, gunzip, разбор `layout`/смещений,
   значения по кадрам, `pointAt`, все ветки ошибок. `npm test` подключён к
   `make check` (`client-test`).
+- **Фильтр One Euro (C3):** `frontend/one-euro.ts` — `OneEuroFilter` (одна
+  величина), `OneEuroPoint` (точка `{x,y,z}`), `OneEuroLandmarks` (набор точек
+  кадра). Алгоритм Casiez et al. (CHI 2012): оценка скорости, срез растёт со
+  скоростью (`minCutoff` + `beta·|dx|`). Параметры по умолчанию под 30 FPS.
+- **Ретаргет (C3):** `frontend/retarget.ts` — `splitFrame` разбивает кадр клипа
+  на части MediaPipe (`pose`, `hand_l`, `hand_r`, `face`) по `offsets` из C2;
+  `retargetParts`/`retargetFrame` вызывают Kalidokit (`Pose.solve`,
+  `Hand.solve`, `Face.solve`) и возвращают чистые числа: углы костей туловища и
+  рук, позы пальцев, мимику (`RetargetedFrame`). Kalidokit не зависит от
+  Three.js здесь — ретаргет тестируется в vitest.
+- **Применение к VRM (C3):** `frontend/vrm-rig.ts` — `applyRetargetedFrame`
+  раскладывает углы по костям `humanoid` (`rightUpperArm` и т.д.), пальцам
+  (`rightIndexProximal`, большой палец `Intermediate → Metacarpal`) и выражениям
+  (`blinkLeft/Right`, `aa/ee/ih/oh/ou`); `resetToNeutral` возвращает rest pose и
+  нулевую мимику. Углы ограничиваются, поза бёдер переносится в уменьшенном
+  масштабе.
+- **Проигрыватель клипа (C3):** `frontend/clip-player.ts` — `ClipPlayer` идёт по
+  кадрам с частотой `fps × speed`, сглаживает landmarks One Euro по частям
+  (сохраняя `visibility` позы), ретаргетит и применяет к VRM; `start`/`stop`,
+  `loop`, `onEnd`, `dispose`.
+- **Демо-клип (C3):** `frontend/demo-clip.ts` — `encodeDemoClip` собирает в
+  браузере синтетический клип «машущие пальцы» (Float16 → gzip → base64) в том же
+  формате, что и инструмент записи: на тестовой странице есть что проиграть без
+  файлов и словаря.
+- **Тестовая страница аватара (C3):** на `/avatar/` добавлены «Демо-клип»,
+  «Играть», «Стоп» и выбор файла `.json.gz`; статус клипа показывается рядом.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -277,6 +303,7 @@
 | JS страницы комнаты | `frontend/rooms.ts` → крупный режим и копирование ссылки |
 | JS аватара (C1) | `frontend/avatar.ts` (класс `Avatar`), `frontend/avatar-page.ts` (страница) |
 | JS декодера клипа (C2) | `frontend/clip.ts` (`decodeClip`, `decodeClipPayload`) |
+| JS ретаргета (C3) | `frontend/retarget.ts`, `frontend/vrm-rig.ts`, `frontend/clip-player.ts`, `frontend/one-euro.ts`, `frontend/demo-clip.ts` |
 
 ## Клиент: режимы
 
@@ -299,6 +326,22 @@
   base64, gzip, разбор `layout` и смещений, значения landmark'ов по кадрам,
   `pointAt`, ошибки (версия, `fps`, `frames`, `layout`, `data`, размер, не-gzip,
   не-JSON). Фикстура `frontend/clip.fixture.ts` собирает настоящий файл клипа.
+- `frontend/one-euro.test.ts` (vitest) — фильтр One Euro (C3): первый кадр без
+  изменений, сглаживание шума, меньший лаг при большой `beta`, сходимость,
+  интервал между кадрами, `reset`, фильтр точки и набора точек.
+- `frontend/retarget.test.ts` (vitest) — ретаргет (C3) на синтетическом скелете
+  (`frontend/retarget.fixture.ts`, MediaPipe-формат): разбиение кадра по частям,
+  `visibility` позы, позы костей и пальцев, реакция на подъём руки и сгиб пальцев,
+  мимика, отсутствие позы.
+- `frontend/vrm-rig.test.ts` (vitest) — применение поз к VRM (C3) на структурной
+  заглушке: раскладка по костям рук и пальцев, большой палец (`Intermediate →
+  Metacarpal`), выражения мимики, ограничение углов, перенос позиции бёдер,
+  `resetToNeutral`, отсутствие кости не роняет.
+- `frontend/clip-player.test.ts` (vitest) — проигрыватель (C3): загрузка и
+  нейтральная поза, прогон кадров через `tick`, остановка на конце, цикл,
+  сглаживание сохраняет `visibility`, `start`/`stop`/`dispose`.
+- `frontend/demo-clip.test.ts` (vitest) — демо-клип (C3): формат v1, декодирование,
+  движение пальцев по кадрам, лицо; проверяет путь ручной проверки целиком.
 - `tests/test_websocket.py` — два клиента одной группы получают сообщение,
   изоляция групп, отказ без разрешённого Origin, отключение echo вне DEBUG.
 - `accounts/tests/` — модель и роли, регистрация/вход/выход, доступ к админке,
@@ -561,26 +604,52 @@
   `vite.config.ts`): декодер — чистые функции над байтами, jsdom не нужен.
   Фикстура (`frontend/clip.fixture.ts`) собирает настоящий `.json.gz` через
   `node:zlib`; в сборку клиента фикстура не попадает (только в тесты).
+- Ретаргет (C3) разделён на три слоя: `retarget.ts` — чистые числа (Kalidokit
+  поверх landmarks, без Three.js), `vrm-rig.ts` — раскладка по костям и мимике
+  VRM, `clip-player.ts` — тайминг и сглаживание. Так улучшение ретаргета или
+  смена аватара не трогает формат клипа (ТЗ 5.4), а логику легко тестировать:
+  `retarget` — на синтетическом скелете, `vrm-rig` — на структурной заглушке.
+- Kalidokit вызывается с `runtime: "mediapipe"` и без `video`/`imageSize`: клип
+  хранит уже нормализованные landmarks (0..1, y вниз), поэтому ретаргет отдаёт
+  их напрямую, без пересчёта в пиксели.
+- В клипе нет `visibility` (формат хранит только x/y/z), но Kalidokit по
+  `visibility ?? 0` сбрасывает «невидимые» руки в нейтраль. `splitFrame` ставит
+  позе `visibility = 1`, а проигрыватель сохраняет её после сглаживания One Euro
+  (фильтр возвращает только x/y/z) — иначе руки гасли бы при воспроизведении.
+- Kalidokit отдаёт `Vector`/`Euler` (классы с методами), но `retarget.ts`
+  приводит выход к простым `{x, y, z}`: дальше по коду идут числа, и модуль не
+  тащит зависимости Kalidokit за пределы ретаргета.
+- Большой палец: у Kalidokit сегменты `Proximal/Intermediate/Distal`, у VRM —
+  `Metacarpal/Proximal/Distal`. Поэтому `Intermediate` ложится на `Metacarpal`,
+  а `Proximal` — на `Proximal` (в `vrm-rig.ts`).
+- Углы ограничиваются (`clamp`) при записи в кость: на «шумных» кадрах и при
+  отсутствии видимости сустав не выворачивается. Позиция бёдер переносится в
+  уменьшенном масштабе (`×0.1`), чтобы аватар не «улетал» из кадра.
+- Синтетический демо-клип (`demo-clip.ts`) собирается в браузере
+  (`CompressionStream` + `btoa`) в том же формате, что пишет инструмент редактора:
+  тестовая страница может проиграть клип без файлов и словаря (в репо клипов нет —
+  их пишет блок D). Тот же путь декодирования, что у реального файла.
 
-## Проверка C2
+## Проверка C3
 
 ```bash
-make check          # ruff + tsc + vitest (24) + pytest (341) + vite build — зелёный
+make check          # ruff + tsc + vitest (63) + pytest (341) + vite build — зелёный
 ```
 
-Критерий этапа («тесты vitest на фикстуре»): `frontend/clip.test.ts` собирает
-настоящий клип (Float16 → gzip → base64 → JSON → `.json.gz`) и проверяет полную
-цепочку декодирования — значения landmark'ов по кадрам совпадают, `layout`
-раскладывается в `offsets`, `pointAt` возвращает координаты точки, а неверная
-версия/`fps`/`frames`/`layout`/`data`/размер и не-gzip/не-JSON дают
-`ClipDecodeError`. `npm test` встроен в `make check` (`make client-test`).
+Автотесты покрывают фильтр One Euro, ретаргет (реакция костей и пальцев на вход),
+раскладку по костям/выражениям VRM и проигрыватель. Критерий этапа требует
+ручной проверки («тестовый клип проигрывается, пальцы читаемы»): открыть
+`/avatar/`, загрузить VRM (поле или `AVATAR_MODEL_URL`), нажать «Демо-клип» и
+«Играть» — аватар машет рукой и сжимает/разжимает пальцы; либо выбрать файл
+`.json.gz`. Полноценная оценка читаемости пальцев — тест с носителем РЖЯ и запись
+реального жеста (блок D).
 
 ## Дальше
 
-**C2 готов.** Следующий — **C3 ★**: ретаргет landmarks на кости VRM через
-Kalidokit + фильтр One Euro (тестовый клип проигрывается, ручная проверка на
-читаемость пальцев). Дальше C4 ★ (очередь клипов и блендинг). Читать:
-`docs/spec/clip-format.md`, `docs/spec/requirements.md` (3.3).
+**C3 готов.** Следующий — **C4 ★**: очередь клипов и блендинг (crossfade
+150-250 мс, нейтральная поза между фразами, скорость 0.6-1.3x), тесты
+планировщика очереди (чистая функция). Дальше C5 (дактиль) и C6-C8. Читать:
+`docs/spec/clip-format.md`, `docs/spec/requirements.md` (3.3, 3.4).
 
 
 Пополнение очереди из реальных занятий подключается в блоке **E**

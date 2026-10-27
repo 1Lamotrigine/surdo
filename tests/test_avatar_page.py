@@ -17,6 +17,11 @@ def test_avatar_page_renders(client):
     assert "data-avatar-page" in html
     assert "data-avatar-stage" in html
     assert "data-avatar-status" in html
+    # C3: управление проигрыванием клипа.
+    assert "data-avatar-demo" in html
+    assert "data-avatar-play" in html
+    assert "data-avatar-stop" in html
+    assert "data-avatar-file" in html
     # Точка входа клиента (собранный ассет или dev-сервер Vite).
     assert "avatar-page" in html
 

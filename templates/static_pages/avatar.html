@@ -32,6 +32,26 @@
       <button class="button" type="submit">Загрузить модель</button>
     </form>
 
+    <section class="avatar-clip" aria-labelledby="clip-title">
+      <h2 id="clip-title">Проигрывание клипа (C3)</h2>
+      <p>
+        После загрузки модели проиграйте синтетический демо-клип (машущие пальцы)
+        или выберите файл <code>.json.gz</code>, записанный инструментом редактора.
+      </p>
+      <div class="avatar-actions">
+        <button class="button" type="button" data-avatar-demo>Демо-клип</button>
+        <button class="button button-secondary" type="button" data-avatar-play>Играть</button>
+        <button class="button button-secondary" type="button" data-avatar-stop>Стоп</button>
+        <label class="avatar-field avatar-field-inline">
+          <span>Файл клипа (.json.gz)</span>
+          <input type="file" accept=".gz,.json,application/gzip" data-avatar-file>
+        </label>
+      </div>
+      <p class="avatar-clip-status" data-clip-status aria-live="polite">
+        Клип не загружен.
+      </p>
+    </section>
+
     {% if not model_url %}
       <aside class="notice notice-warning">
         Модель не задана. Укажите URL файла <code>.vrm</code> в поле или задайте

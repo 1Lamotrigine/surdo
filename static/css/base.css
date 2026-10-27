@@ -1226,3 +1226,33 @@ button:focus-visible {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+/* C3: проигрывание клипа */
+.avatar-clip {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.avatar-clip h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.avatar-field-inline {
+  flex: 0 1 auto;
+}
+
+.avatar-clip-status {
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
