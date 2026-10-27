@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A5 — комнаты: готов.**
+**A6 — страница создания комнаты и QR: готов.**
 
 ## Что готово
 
@@ -47,6 +47,13 @@
   с `closed_at`, сервис `create_room` с повтором при коллизии кода.
 - **Админка комнат:** список, фильтры по статусу/демо-режиму/языку, поиск,
   действие «Закрыть выбранные комнаты».
+- **Создание комнаты (A6):** страница `GET/POST /rooms/new/` (только teacher/admin),
+  `POST /api/rooms/` с ответом `{id, join_code, join_url}` для будущего PWA.
+- **QR-код (A6):** `segno` рисует inline SVG со ссылкой вида
+  `https://<домен>/r/<ID>/`; ссылка собирается из запроса (`build_absolute_uri`).
+- **Страница комнаты (A6):** `GET /rooms/<code>/` показывает крупный ID, QR,
+  абсолютную ссылку, копирование в буфер обмена и кнопку «Крупный режим» для
+  проектора (fullscreen + упрощённый вид, выход по Esc).
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -63,11 +70,16 @@
 | Вход | `GET/POST /accounts/login/` → `LoginView` + `EmailAuthenticationForm` |
 | Регистрация | `GET/POST /accounts/register/` → `accounts.views.register` |
 | Выход | `POST /accounts/logout/` → `LogoutView` |
+| Создание комнаты | `GET/POST /rooms/new/` → `rooms.views.create_room_view` |
+| Страница комнаты (QR + ID) | `GET /rooms/<code>/` → `rooms.views.room_detail` |
+| API создания комнаты | `POST /api/rooms/` → `rooms.api.create_room_api` |
+| Ссылка из QR | `GET /r/<code>/` (страница входа студента — этап A7) |
 | Админка | `GET /admin/` |
 | WebSocket (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
 | WSGI-приложение | `config.wsgi:application` |
 | JS-точка входа | `frontend/main.ts` → `{% vite_asset 'frontend/main.ts' %}` |
+| JS страницы комнаты | `frontend/rooms.ts` → крупный режим и копирование ссылки |
 
 ## Клиент: режимы
 
@@ -88,7 +100,8 @@
   команда `seed_admin` (создание, обновление, ошибки).
 - `rooms/tests/` — формат и алфавит `join_code`, автогенерация кода, уникальность
   среди открытых комнат, повторное использование после закрытия, идемпотентное
-  закрытие, повторы сервиса при коллизии.
+  закрытие, повторы сервиса при коллизии, QR и ссылка `/r/<code>/`, страницы
+  создания/просмотра комнаты, доступ по ролям, JSON API создания.
 - Тесты WebSocket синхронные: сценарий целиком выполняется в `asyncio.run`,
   `CHANNEL_LAYERS` на время теста подменяется на in-memory через `settings`.
 
@@ -115,22 +128,29 @@
   Старый QR перестанет работать, потому что поиск комнаты идёт по открытым.
 - `join_code` генерируется криптографическим `secrets.choice` из алфавита
   `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`; O/0 и I/1 исключены.
+- QR строится на сервере через `segno.svg_inline` (inline SVG, не `<img>`), поэтому
+  код масштабируется в «крупном режиме» без потери качества и не требует запроса.
+  Ссылка внутри QR собирается из запроса, а маршрут всегда `/r/<ID>/`.
+- Создавать и смотреть комнату может только `teacher` (владелец) или `admin`;
+  редактор получает 403, гость — редирект на вход.
 
-## Проверка A5
+## Проверка A6
 
 ```bash
-make check      # ruff + tsc + vite build + 44 теста — зелёный
-make migrate    # применяет rooms.0001_initial
+make check          # ruff + tsc + vite build + 61 тест — зелёный
+make up && make migrate
+# вход преподавателем → /rooms/new/ → POST → /rooms/<code>/ с QR и крупным режимом
 ```
 
-Тесты проверяют длину и алфавит кода (без O/0/I/1), автогенерацию при создании
-комнаты, уникальность кода среди открытых комнат, повторное использование кода
-после закрытия, заполнение `closed_at` и идемпотентность `close()`. Сервис
-`create_room` повторяет генерацию при коллизии и ограничивает число попыток.
+Проверено вручную: преподаватель создаёт комнату на `/rooms/new/`, после
+редиректа на `/rooms/<code>/` страница отдаёт inline SVG QR, крупный ID и ссылку
+`http://<host>/r/<code>/`; `POST /api/rooms/` отвечает `201` с `join_code` и
+`join_url`. Тесты проверяют, что QR-ссылка содержит `/r/<code>/`, доступ по ролям
+и 404 для неизвестного кода.
 
 ## Дальше
 
-**A6 — страница создания комнаты:** ID, QR (`segno`, SVG), крупный режим для
-проектора. Критерий: QR содержит ссылку `/r/<ID>/`. Читать:
-`docs/spec/requirements.md` (раздел 3.1), `docs/spec/api.md`,
-`docs/spec/db-schema.md`.
+**A7 — вход студента:** главная с полем ID, страница `/r/<code>/`, ввод имени,
+гостевая сессия, rate limit через Redis. Критерий: тесты неверного ID, закрытой
+комнаты и лимита перебора. Читать: `docs/spec/requirements.md` (раздел 3.1),
+`docs/spec/db-schema.md`, `docs/spec/ws-events.md`.

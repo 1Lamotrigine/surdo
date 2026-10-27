@@ -184,6 +184,13 @@ main {
   max-width: 44rem;
 }
 
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent);
@@ -387,6 +394,282 @@ h1 {
   font-weight: 600;
 }
 
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.button-secondary {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+}
+
+.button-secondary:hover {
+  background: #eef1f8;
+}
+
+.field input[type="checkbox"] {
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-top: 0.15rem;
+  accent-color: var(--accent);
+}
+
+.field-checkbox {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #fff;
+}
+
+.field-checkbox > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.field-checkbox label {
+  cursor: pointer;
+}
+
+.room-create {
+  max-width: 42rem;
+}
+
+.room-create .lead {
+  font-size: 1rem;
+}
+
+.room-form {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.room-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.room-display {
+  padding: clamp(1.5rem, 4vw, 3rem);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.room-head h1 {
+  margin-bottom: 0.75rem;
+  font-size: clamp(1.75rem, 4vw, 2.8rem);
+}
+
+.room-head .lead {
+  font-size: 1rem;
+}
+
+.room-grid {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 1.2fr);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  align-items: center;
+  margin-top: 2rem;
+}
+
+.qr-panel {
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.qr-label,
+.room-label {
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qr-code {
+  width: 100%;
+  max-width: 20rem;
+  margin-inline: auto;
+}
+
+.qr-code svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.qr-hint {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.room-info {
+  min-width: 0;
+}
+
+.join-code {
+  margin: 0;
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: clamp(3rem, 9vw, 7rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.room-link {
+  margin: 0.75rem 0 0;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.room-link a {
+  color: var(--accent);
+}
+
+.room-help {
+  max-width: 32rem;
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+}
+
+.room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 1.5rem;
+}
+
+.copy-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.projector-hint {
+  margin: 2rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.notice {
+  margin-top: 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.notice-warning {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #78350f;
+}
+
+.room-display-closed {
+  background: #f8fafc;
+}
+
+body.projector-mode {
+  overflow: hidden;
+  background: #fff;
+}
+
+body.projector-mode .site-header,
+body.projector-mode .messages,
+body.projector-mode .site-footer,
+body.projector-mode .projector-hint,
+body.projector-mode .room-head .eyebrow,
+body.projector-mode .room-head .lead,
+body.projector-mode .qr-label,
+body.projector-mode .qr-hint,
+body.projector-mode .room-label,
+body.projector-mode .room-link,
+body.projector-mode .room-help,
+body.projector-mode .room-actions .button-secondary,
+body.projector-mode .copy-status {
+  display: none;
+}
+
+body.projector-mode main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 0;
+}
+
+body.projector-mode .wrap {
+  width: 100%;
+}
+
+body.projector-mode .room-display {
+  width: 100%;
+  max-width: none;
+  padding: clamp(1rem, 3vw, 3rem);
+  border: 0;
+  border-radius: 0;
+}
+
+body.projector-mode .room-head h1 {
+  margin-bottom: 1.5rem;
+  font-size: clamp(2rem, 5vw, 4rem);
+}
+
+body.projector-mode .room-grid {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: clamp(2rem, 6vw, 6rem);
+  margin: 0;
+}
+
+body.projector-mode .qr-panel {
+  padding: 0;
+  border: 0;
+}
+
+body.projector-mode .qr-code {
+  width: min(60vh, 60vw);
+  max-width: none;
+}
+
+body.projector-mode .join-code {
+  font-size: clamp(5rem, 15vw, 12rem);
+}
+
+body.projector-mode .room-actions {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  margin: 0;
+  opacity: 0.35;
+}
+
+body.projector-mode .room-actions:hover,
+body.projector-mode .room-actions:focus-within {
+  opacity: 1;
+}
+
 code {
   background: #eceffd;
   border-radius: 0.3rem;
@@ -429,5 +712,27 @@ button:focus-visible {
 
   .htmx-demo {
     grid-template-columns: 1fr;
+  }
+
+  .room-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qr-panel {
+    max-width: 24rem;
+    margin-inline: auto;
+  }
+
+  body.projector-mode .room-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  body.projector-mode .qr-code {
+    width: min(52vh, 70vw);
+  }
+
+  body.projector-mode .join-code {
+    font-size: clamp(3.5rem, 18vw, 7rem);
   }
 }
