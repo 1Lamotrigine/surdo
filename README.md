@@ -20,12 +20,28 @@ make setup               # venv, Python- и npm-зависимости
 make check               # ruff + tsc + vite build + pytest (поднимает контейнер db)
 docker compose up --build -d
 docker compose exec web python manage.py migrate
+docker compose exec web python manage.py seed_admin
 ```
+
+Перед `seed_admin` задайте `ADMIN_EMAIL`, `ADMIN_PASSWORD` и `ADMIN_NAME` в `.env`
+(или передайте `--email`, `--password`, `--name`). Команда идемпотентна.
 
 Стартовая страница: <http://localhost/> (через Caddy), health: <http://localhost/health/>.
 
+> Если база создавалась до этапа A4, пересоздайте локальный volume
+> (`docker compose down -v`): добавлена кастомная модель пользователя. Делайте это
+> только пока в базе нет реальных данных.
+
 На этапе A2 доступен тестовый WebSocket-эхо `ws://localhost/ws/echo/<group>/`
 (только при `DEBUG=True`). Два клиента одной группы получают общие сообщения.
+
+## Аккаунты и роли
+
+Вход выполняется по email и паролю: `/accounts/login/`. Публичная регистрация
+(`/accounts/register/`) создаёт пользователя с ролью `teacher`. Роли `editor`,
+`expert` и `admin` назначает администратор в Django Admin (`/admin/`).
+Начальный администратор создаётся командой `seed_admin`. Выход — POST на
+`/accounts/logout/`.
 
 ## Клиент в разработке
 
@@ -69,6 +85,7 @@ make client-typecheck # проверка TypeScript
 make up               # docker compose up --build
 make down             # остановить стек
 make migrate          # применить миграции
+make seed-admin       # создать/обновить администратора из ADMIN_* в .env
 make logs             # логи web
 ```
 

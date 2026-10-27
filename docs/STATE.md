@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A3 — сборка клиента: готов.**
+**A4 — пользователи и роли: готов.**
 
 ## Что готово
 
@@ -32,8 +32,17 @@
   `GET /partials/htmx-demo/` без перезагрузки страницы.
 - **Сборка клиента:** `npm run dev` (HMR) и `npm run build` (`static/dist`,
   manifest). В Docker образ попадает только результат сборки из `node:22-slim`.
+- **Пользователи (A4):** кастомная модель `accounts.User` (email вместо username,
+  имя, роль, `created_at`), роли `teacher/editor/expert/admin`, менеджер с
+  нормализацией email и регистронезависимым входом.
+- **Аутентификация (A4):** вход по email и паролю, публичная регистрация создаёт
+  преподавателя, выход только POST-запросом. Редакторов, экспертов и
+  администраторов назначает администратор в Django Admin.
+- **Seed администратора:** `python manage.py seed_admin` читает `ADMIN_EMAIL`,
+  `ADMIN_PASSWORD`, `ADMIN_NAME` или аргументы `--email/--password/--name`,
+  идемпотентно создаёт/обновляет администратора.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
-  `client-dev`, `client-build`, `client-typecheck`.
+  `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
 - `AGENTS.md`, `.env.example`, `.dockerignore`, `.gitignore`, `README.md`.
 - `docs/spec/` — 12 выжимок из ТЗ по разделам.
@@ -45,6 +54,9 @@
 | Стартовая страница | `GET /` → `config.views.home` |
 | Health | `GET /health/` → `config.views.health` |
 | HTMX-фрагмент | `GET /partials/htmx-demo/` → `config.views.htmx_demo` |
+| Вход | `GET/POST /accounts/login/` → `LoginView` + `EmailAuthenticationForm` |
+| Регистрация | `GET/POST /accounts/register/` → `accounts.views.register` |
+| Выход | `POST /accounts/logout/` → `LogoutView` |
 | Админка | `GET /admin/` |
 | WebSocket (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
@@ -66,6 +78,8 @@
 - `tests/test_frontend.py` — манифест Vite и URL собранного ассета.
 - `tests/test_websocket.py` — два клиента одной группы получают сообщение,
   изоляция групп, отказ без разрешённого Origin, отключение echo вне DEBUG.
+- `accounts/tests/` — модель и роли, регистрация/вход/выход, доступ к админке,
+  команда `seed_admin` (создание, обновление, ошибки).
 - Тесты WebSocket синхронные: сценарий целиком выполняется в `asyncio.run`,
   `CHANNEL_LAYERS` на время теста подменяется на in-memory через `settings`.
 
@@ -82,22 +96,30 @@
   и в Docker.
 - `services` не является Django-приложением: там будут чистые модули `asr`,
   `gloss`, `compress` за интерфейсами.
+- `AUTH_USER_MODEL = "accounts.User"` задан до первых миграций A4. Если локальная
+  база создавалась на A1–A3, её нужно пересоздать: `docker compose down -v`
+  (реальных данных ещё нет), затем `make up`, `make migrate`, `make seed-admin`.
+- Публичная регистрация всегда создаёт `teacher`; роль нельзя выбрать в форме.
+  Повышение роли выполняется в Django Admin.
 
-## Проверка A3
+## Проверка A4
 
 ```bash
-make check      # ruff + tsc + vite build + 9 тестов — зелёный
-make up         # ассет /static/dist/assets/main-*.js отдаётся с 200
-# dev: DJANGO_VITE_DEV_MODE=True + make client-dev → модуль с :5173 отдаётся с 200
+make check      # ruff + tsc + vite build + 31 тест — зелёный
+make up
+make migrate
+make seed-admin # ADMIN_EMAIL/ADMIN_PASSWORD/ADMIN_NAME из .env
 ```
 
-Проверено вручную: в dev-режиме HTML ссылается на
-`http://localhost:5173/static/dist/frontend/main.ts`, Vite отвечает 200; после
-сборки Docker-образ отдаёт хэшированный `/static/dist/assets/main-*.js` (200) и
-HTMX-фрагмент (200).
+Проверено вручную: миграции применяются на чистой PostgreSQL, `seed_admin`
+идемпотентен (повторный запуск обновляет того же пользователя), администратор
+входит по email, роль `admin`, `is_staff=True`, `is_superuser=True`. Тесты
+проверяют регистрацию (teacher), вход с email в другом регистре, выход, роли и
+доступ преподавателя/администратора к `/admin/`.
 
 ## Дальше
 
-**A4 — пользователи и роли** (teacher, editor, expert, admin): кастомная модель
-`User`, вход, регистрация, seed админа. Читать: `docs/spec/requirements.md`
-(раздел 3.1), `docs/spec/db-schema.md`, `docs/spec/ws-events.md`.
+**A5 — комнаты:** модель `Room`, генератор `join_code` (6 символов без O/0 и I/1),
+закрытие комнаты. Критерий: тесты уникальности среди открытых комнат и закрытия.
+Читать: `docs/spec/requirements.md` (раздел 3.1), `docs/spec/db-schema.md`,
+`docs/spec/ws-events.md`.
