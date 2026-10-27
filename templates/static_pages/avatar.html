@@ -12,7 +12,7 @@
       <h1>Аватар в браузере</h1>
       <p class="lead">
         Сцена WebGL, свет, камера, загрузка VRM, декодер клипов, ретаргет,
-        очередь с блендингом и дактиль по буквам. Субтитры (C6) появятся дальше.
+        очередь с блендингом, дактиль по буквам и субтитры с подсветкой слова.
       </p>
     </header>
 
@@ -78,6 +78,22 @@
           <input type="text" value="Иванов" data-avatar-dactyl-text>
         </label>
         <button class="button" type="button" data-avatar-dactyl>Показать по буквам</button>
+      </div>
+    </section>
+
+    <section class="avatar-subtitles-section" aria-labelledby="subtitles-title">
+      <h2 id="subtitles-title">Субтитры (C6)</h2>
+      <p>
+        Синтетическая фраза с жестами, числом и словом по буквам. Аватар
+        проигрывает её, а субтитр подсвечивает слово, которое «проговаривается»
+        сейчас.
+      </p>
+      <div class="avatar-actions">
+        <button class="button" type="button" data-avatar-phrase>Фраза с субтитрами</button>
+      </div>
+      <div class="avatar-subtitles subtitle-size-large subtitle-theme-dark" data-avatar-subtitles
+           aria-live="polite" aria-label="Субтитры фразы">
+        <p class="subtitle-line subtitle-placeholder">Субтитры появятся после запуска фразы.</p>
       </div>
     </section>
 

@@ -29,6 +29,10 @@ def test_avatar_page_renders(client):
     # C5: дактиль — ввод слова и показ по буквам.
     assert "data-avatar-dactyl" in html
     assert "data-avatar-dactyl-text" in html
+    # C6: субтитры — фраза и контейнер подсветки слова.
+    assert "data-avatar-phrase" in html
+    assert "data-avatar-subtitles" in html
+    assert "subtitle-size-large" in html
     # Точка входа клиента (собранный ассет или dev-сервер Vite).
     assert "avatar-page" in html
 

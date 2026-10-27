@@ -1256,3 +1256,76 @@ button:focus-visible {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+/* C6: субтитры — подсветка текущего слова, размер и контраст */
+.avatar-subtitles-section {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.avatar-subtitles-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.avatar-subtitles {
+  margin-top: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
+  line-height: 1.6;
+}
+
+.avatar-subtitles .subtitle-line {
+  margin: 0;
+}
+
+.subtitle-placeholder {
+  color: var(--muted);
+}
+
+/* Тема (контраст): светлая и тёмная подложка под текст. */
+.subtitle-theme-dark {
+  background: #111827;
+  color: #f9fafb;
+}
+
+.subtitle-theme-light {
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid var(--border);
+}
+
+/* Размер букв субтитров. */
+.subtitle-size-small .subtitle-line {
+  font-size: 1.05rem;
+}
+
+.subtitle-size-medium .subtitle-line {
+  font-size: 1.35rem;
+}
+
+.subtitle-size-large .subtitle-line {
+  font-size: 1.9rem;
+}
+
+.subtitle-word {
+  transition: background-color 120ms ease, color 120ms ease;
+  border-radius: 0.35rem;
+}
+
+/* Подсветка текущего слова: заметный контраст в обеих темах. */
+.subtitle-theme-dark .subtitle-word-active {
+  background: #fbbf24;
+  color: #111827;
+}
+
+.subtitle-theme-light .subtitle-word-active {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+/* Упрощённый режим (только субтитры): заметная пометка. */
+.subtitle-degraded {
+  border-left: 4px solid #f59e0b;
+}

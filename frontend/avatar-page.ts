@@ -15,6 +15,8 @@ import {
   encodeDemoQueue,
   encodeNeutralPauseClip,
 } from "./demo-clip";
+import { DEMO_PHRASE, encodePhraseClips } from "./demo-phrase";
+import { SubtitleView, alignTokens, utteranceUnits, wordIndexForToken } from "./subtitles";
 
 const STATUS_LABELS: Record<AvatarStatus, string> = {
   loading: "Загрузка…",
@@ -27,6 +29,8 @@ type QueueConfig = {
   mode: "phrase" | "dactyl";
   crossfadeMs?: number;
   label: string;
+  /** Показать субтитры фразы и подсвечивать слова по текущему клипу (C6). */
+  subtitles?: boolean;
 };
 
 function setupAvatarPage(root: HTMLElement): void {
@@ -42,6 +46,8 @@ function setupAvatarPage(root: HTMLElement): void {
   const gapInput = root.querySelector<HTMLInputElement>("[data-avatar-gap]");
   const dactylInput = root.querySelector<HTMLInputElement>("[data-avatar-dactyl-text]");
   const dactylButton = root.querySelector<HTMLButtonElement>("[data-avatar-dactyl]");
+  const phraseButton = root.querySelector<HTMLButtonElement>("[data-avatar-phrase]");
+  const subtitleRoot = root.querySelector<HTMLElement>("[data-avatar-subtitles]");
   const fileInput = root.querySelector<HTMLInputElement>("[data-avatar-file]");
   const clipStatus = root.querySelector<HTMLElement>("[data-clip-status]");
   if (!stage) return;
@@ -61,6 +67,16 @@ function setupAvatarPage(root: HTMLElement): void {
     background: root.dataset.avatarBackground || undefined,
     onStatus: setStatus,
   });
+
+  // Субтитры (C6): подсвечивают слово по текущему клипу очереди.
+  const subtitles = subtitleRoot ? new SubtitleView(subtitleRoot, { size: "large", theme: "dark" }) : null;
+  // Соответствие «индекс клипа → слово субтитра» для текущей фразы.
+  let phraseWordByClip: number[] = [];
+
+  const highlightClip = (index: number): void => {
+    const wordIndex = phraseWordByClip[index] ?? -1;
+    subtitles?.highlight(wordIndex);
+  };
 
   // Игрок создаётся после загрузки модели: он привязан к конкретному VRM.
   let player: ClipPlayer | null = null;
@@ -88,8 +104,14 @@ function setupAvatarPage(root: HTMLElement): void {
         gapMs,
         mode: queueConfig.mode,
         crossfadeMs: queueConfig.crossfadeMs,
-        onEnd: () => setClipStatus(`${queueConfig.label}: проиграно.`),
-        onClip: (index) => setClipStatus(`${queueConfig.label}: клип ${index + 1} из ${queue.length}…`),
+        onEnd: () => {
+          setClipStatus(`${queueConfig.label}: проиграно.`);
+          subtitles?.highlight(-1);
+        },
+        onClip: (index) => {
+          setClipStatus(`${queueConfig.label}: клип ${index + 1} из ${queue.length}…`);
+          highlightClip(index);
+        },
       });
     }
     return player;
@@ -99,6 +121,11 @@ function setupAvatarPage(root: HTMLElement): void {
   const loadQueue = (decoded: DecodedClip[], config: QueueConfig): void => {
     queue = decoded;
     queueConfig = config;
+    // Смена очереди без фразы снимает подсветку и старую разметку субтитров.
+    if (!config.subtitles) {
+      phraseWordByClip = [];
+      subtitles?.clear();
+    }
     // Режим/скорость/пауза могли измениться — пересоздаём игрок, чтобы он взял их.
     player?.dispose();
     player = null;
@@ -184,6 +211,29 @@ function setupAvatarPage(root: HTMLElement): void {
       if (player) setClipStatus(`Дактиль «${text}»: воспроизведение по буквам…`);
     } catch (error) {
       setClipStatus(`Не удалось собрать дактиль: ${String(error)}`);
+    }
+  });
+
+  phraseButton?.addEventListener("click", async () => {
+    setClipStatus("Сборка фразы с субтитрами…");
+    try {
+      const payloads = await encodePhraseClips(DEMO_PHRASE);
+      const decoded = await Promise.all(payloads.map((payload) => decodeClipPayload(payload)));
+      // Разметка субтитра и карта «индекс клипа → слово»: единица показа знает
+      // свой токен, токен — своё слово в тексте (FR-10).
+      const words = alignTokens(DEMO_PHRASE);
+      const units = utteranceUnits(DEMO_PHRASE);
+      phraseWordByClip = units.map((unit) => wordIndexForToken(words, unit.tokenIndex));
+      subtitles?.render(DEMO_PHRASE, words);
+      loadQueue(decoded, {
+        mode: "phrase",
+        label: `Фраза «${DEMO_PHRASE.text}»`,
+        subtitles: true,
+      });
+      player?.start();
+      if (player) setClipStatus(`Фраза «${DEMO_PHRASE.text}»: субтитры подсвечивают слово…`);
+    } catch (error) {
+      setClipStatus(`Не удалось собрать фразу: ${String(error)}`);
     }
   });
 
