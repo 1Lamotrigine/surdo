@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% load django_vite %}
+
+{% block title %}Комната {{ room.join_code }} · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="room-page">
+    <article class="room-display{% if not room.is_open %} room-display-closed{% endif %}">
+      <header class="room-head">
+        <p class="eyebrow">
+          {% if room.is_open %}Комната открыта{% else %}Комната закрыта{% endif %}
+        </p>
+        <h1>{{ room.title }}</h1>
+        <p class="lead">
+          {% if room.is_open %}
+            Покажите QR-код на экране или назовите студентам ID комнаты.
+          {% else %}
+            Новые участники уже не могут войти в эту комнату.
+          {% endif %}
+        </p>
+      </header>
+
+      {% if room.is_open %}
+        <div class="room-grid">
+          <div class="qr-panel">
+            <p class="qr-label">QR-код для входа</p>
+            <div class="qr-code">{{ qr_svg|safe }}</div>
+            <p class="qr-hint">Наведите камеру телефона</p>
+          </div>
+
+          <div class="room-info">
+            <p class="room-label">ID комнаты</p>
+            <p class="join-code" data-join-code>{{ room.join_code }}</p>
+            <p class="room-link"><a href="{{ join_url }}">{{ join_url }}</a></p>
+            <p class="room-help">
+              Студент может отсканировать QR-код или открыть сайт и ввести этот ID.
+            </p>
+
+            <div class="room-actions">
+              <button class="button" type="button" data-projector-toggle aria-pressed="false">
+                Крупный режим
+              </button>
+              <button class="button button-secondary" type="button"
+                      data-copy-link data-copy-value="{{ join_url }}">
+                Скопировать ссылку
+              </button>
+              <a class="button button-secondary" href="{% url 'rooms:create' %}">Создать ещё</a>
+              <span class="copy-status" data-copy-status aria-live="polite"></span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="projector-hint">
+          Для проектора нажмите «Крупный режим»: останется только QR-код и ID.
+          Выйти можно той же кнопкой или клавишей Esc.
+        </aside>
+      {% else %}
+        <div class="room-actions">
+          <a class="button" href="{% url 'rooms:create' %}">Создать новую комнату</a>
+        </div>
+      {% endif %}
+
+      {% if room.demo_mode %}
+        <aside class="notice notice-warning">
+          Демо-режим: в комнате могут показываться непроверенные жесты с пометкой
+          «прототип, жест не проверен носителем».
+        </aside>
+      {% endif %}
+    </article>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {% vite_asset 'frontend/rooms.ts' %}
+{% endblock %}
