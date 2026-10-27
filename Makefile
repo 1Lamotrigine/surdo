@@ -4,11 +4,13 @@ PYTHON ?= .venv/bin/python
 COMPOSE ?= docker compose
 NPM ?= npm
 DB_PASSWORD ?= change-me
+LOAD_URL ?= http://localhost:80
+LOAD_CLIENTS ?= 30
 
 -include .env
 export
 
-.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-test client-dev
+.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-test client-dev load
 
 help:
 	@echo "make setup           — .env, venv, Python- и npm-зависимости"
@@ -18,6 +20,7 @@ help:
 	@echo "make migrate         — применить миграции"
 	@echo "make seed-admin      — создать/обновить администратора из ADMIN_*"
 	@echo "make env             — создать .env из .env.example"
+	@echo "make load            — нагрузка: комната и 30 WebSocket-клиентов (G3)"
 	@echo "make client-dev      — Vite dev-сервер с HMR на :5173"
 	@echo "make client-build    — production-сборка в static/dist"
 	@echo "make client-typecheck — проверка TypeScript"
@@ -79,6 +82,13 @@ migrate:
 
 seed-admin:
 	$(COMPOSE) exec web python manage.py seed_admin
+
+load: .env
+	@test -x $(PYTHON) || { echo "Нет $(PYTHON). Выполните: make setup"; exit 1; }
+	# Скрипт работает на хосте: база — из compose-порта, мимо Caddy; Redis не
+	# нужен (лимиты скрипта локальны, серверный кэш от него не зависит).
+	DATABASE_URL="postgres://app:$(DB_PASSWORD)@127.0.0.1:55432/app" REDIS_URL="" \
+		$(PYTHON) scripts/load_test.py --url $(LOAD_URL) --clients $(LOAD_CLIENTS)
 
 makemigrations:
 	$(COMPOSE) exec web python manage.py makemigrations
