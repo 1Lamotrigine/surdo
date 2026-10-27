@@ -15,6 +15,17 @@ def can_create_room(user) -> bool:
     )
 
 
+def is_room_member(request, room) -> bool:
+    """Участник комнаты: владелец/админ или гость с записанным именем."""
+    user = request.user
+    if user.is_authenticated and (
+        getattr(user, "is_admin", False) or room.owner_id == user.pk
+    ):
+        return True
+    mapping = request.session.get("rooms") or {}
+    return isinstance(mapping.get(room.join_code), dict)
+
+
 def room_creator_required(view: Callable):
     """Пускать только преподавателя или администратора."""
 

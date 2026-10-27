@@ -4,7 +4,7 @@
 {% block title %}{{ room.title }} · ИИ-аватар сурдопереводчик{% endblock %}
 
 {% block content %}
-  <section class="student-room" data-room-socket data-join-code="{{ room.join_code }}">
+  <section class="student-room" data-room-live data-join-code="{{ room.join_code }}">
     <header class="student-head">
       <p class="eyebrow">Комната {{ room.join_code }}</p>
       <h1>{{ room.title }}</h1>
@@ -24,19 +24,23 @@
       </p>
     </div>
 
-    <aside class="presence-panel" aria-labelledby="presence-title">
-      <h2 id="presence-title">В комнате</h2>
-      <ul class="presence-list" data-presence-list aria-live="polite"></ul>
-    </aside>
-
     {% if room.demo_mode %}
       <aside class="notice notice-warning">
         Демо-режим: часть жестов ещё не проверена носителем.
       </aside>
     {% endif %}
+
+    <div class="student-columns">
+      {% include "rooms/_chat.html" %}
+
+      <aside class="presence-panel" aria-labelledby="presence-title">
+        <h2 id="presence-title">В комнате</h2>
+        <ul class="presence-list" data-presence-list aria-live="polite"></ul>
+      </aside>
+    </div>
   </section>
 {% endblock %}
 
 {% block scripts %}
-  {% vite_asset 'frontend/room-socket.ts' %}
+  {% vite_asset 'frontend/room-live.ts' %}
 {% endblock %}

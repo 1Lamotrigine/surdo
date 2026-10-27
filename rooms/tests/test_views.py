@@ -88,3 +88,36 @@ def test_closed_room_hides_qr(client, owner):
     assert response.status_code == 200
     assert "Комната закрыта" in html
     assert "<svg" not in html
+
+
+def test_teacher_live_page_shows_chat_and_presence(client, owner):
+    room = Room.objects.create(owner=owner, join_code="LIVE01")
+    client.force_login(owner)
+
+    response = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code}))
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'data-room-live' in html
+    assert f'data-join-code="{room.join_code}"' in html
+    assert "data-chat-log" in html
+    assert "data-chat-form" in html
+    assert "data-presence-list" in html
+
+
+def test_teacher_live_rejects_other_teacher(client, owner, other_teacher):
+    room = Room.objects.create(owner=owner, join_code="LIVE02")
+    client.force_login(other_teacher)
+
+    response = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code}))
+
+    assert response.status_code == 403
+
+
+def test_teacher_live_requires_login(client, owner):
+    room = Room.objects.create(owner=owner, join_code="LIVE03")
+
+    response = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code}))
+
+    assert response.status_code == 302
+    assert reverse("accounts:login") in response.url

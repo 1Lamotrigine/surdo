@@ -71,6 +71,24 @@ def room_detail(request: HttpRequest, join_code: str):
     )
 
 
+@room_creator_required
+def room_live(request: HttpRequest, join_code: str):
+    """Панель преподавателя: QR, ID, чат и участники в реальном времени."""
+    room = _get_room_or_404(join_code)
+    if not _can_view_room(request.user, room):
+        raise PermissionDenied("Нет доступа к этой комнате.")
+
+    return render(
+        request,
+        "rooms/live.html",
+        {
+            "room": room,
+            "join_url": build_join_url(request, room.join_code),
+            "qr_svg": room_qr_svg(request, room),
+        },
+    )
+
+
 @require_http_methods(["GET", "POST"])
 def room_join(request: HttpRequest, join_code: str):
     """Вход студента: гостевая сессия по имени, без регистрации."""

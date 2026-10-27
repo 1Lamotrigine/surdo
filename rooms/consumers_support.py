@@ -18,6 +18,7 @@ class ConnectionIdentity:
     name: str
     guest: bool
     participant_id: int | None
+    is_teacher: bool = False
 
 
 def _is_room_staff(user, room: Room) -> bool:
@@ -50,6 +51,7 @@ def resolve_connection(scope, room: Room, channel_name: str) -> ConnectionIdenti
             name=name,
             guest=False,
             participant_id=None,
+            is_teacher=True,
         )
 
     name, session_key = _guest_name_from_session(scope, room)

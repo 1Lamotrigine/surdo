@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load django_vite %}
+
+{% block title %}Панель комнаты {{ room.join_code }} · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="teacher-live" data-room-live data-join-code="{{ room.join_code }}">
+    <header class="teacher-live-head">
+      <div>
+        <p class="eyebrow">Панель преподавателя</p>
+        <h1>{{ room.title }}</h1>
+        <p class="lead">
+          Комната <strong>{{ room.join_code }}</strong>.
+          <span class="socket-status" data-socket-status data-state="loading" aria-live="polite">
+            Подключение…
+          </span>
+        </p>
+      </div>
+      <a class="button button-secondary" href="{% url 'rooms:detail' join_code=room.join_code %}">
+        QR и ID для студентов
+      </a>
+    </header>
+
+    {% if room.is_closed %}
+      <aside class="notice notice-warning">Комната закрыта. Чат недоступен.</aside>
+    {% endif %}
+
+    <div class="teacher-live-grid">
+      <div class="teacher-live-main">
+        <div class="student-stage" aria-label="Область аватара и субтитров">
+          <p class="student-placeholder">
+            Субтитры и панель фраз появятся в блоке E. Пока здесь чат и участники.
+          </p>
+        </div>
+      </div>
+
+      <div class="teacher-live-side">
+        {% include "rooms/_chat.html" %}
+
+        <aside class="presence-panel" aria-labelledby="presence-title">
+          <h2 id="presence-title">В комнате</h2>
+          <ul class="presence-list" data-presence-list aria-live="polite"></ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {% vite_asset 'frontend/room-live.ts' %}
+{% endblock %}

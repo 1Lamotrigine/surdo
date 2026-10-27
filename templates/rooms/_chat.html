@@ -1,0 +1,22 @@
+{% comment %}
+Чат комнаты. Требует в контексте `room`; используется студентом и преподавателем.
+{% endcomment %}
+<section class="chat-panel" aria-labelledby="chat-title">
+  <h2 id="chat-title">Чат</h2>
+  <ul class="chat-log" data-chat-log aria-live="polite" aria-label="Сообщения чата"></ul>
+  <form class="chat-form" data-chat-form>
+    <label class="visually-hidden" for="chat-input">Текст сообщения</label>
+    <textarea
+      id="chat-input"
+      class="chat-input"
+      data-chat-input
+      name="body"
+      rows="2"
+      maxlength="500"
+      placeholder="Напишите вопрос…"
+      autocomplete="off"
+    ></textarea>
+    <button class="button" type="submit">Отправить</button>
+  </form>
+  <p class="chat-hint" data-chat-hint aria-live="polite"></p>
+</section>

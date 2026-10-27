@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from rooms.models import Participant, Room
+from rooms.models import Message, Participant, Room
 
 
 class ParticipantInline(admin.TabularInline):
@@ -11,6 +11,15 @@ class ParticipantInline(admin.TabularInline):
     fields = ("user", "guest_name", "session_key", "joined_at", "removed_at")
     readonly_fields = ("session_key", "joined_at")
     autocomplete_fields = ("user",)
+
+
+class MessageInline(admin.TabularInline):
+    model = Message
+    extra = 0
+    fields = ("author_name", "is_teacher", "body", "created_at")
+    readonly_fields = ("author_name", "is_teacher", "body", "created_at")
+    can_delete = False
+    show_change_link = True
 
 
 @admin.register(Room)
@@ -28,7 +37,7 @@ class RoomAdmin(admin.ModelAdmin):
     search_fields = ("join_code", "title", "owner__email", "owner__name")
     list_select_related = ("owner",)
     readonly_fields = ("join_code", "created_at", "closed_at")
-    inlines = (ParticipantInline,)
+    inlines = (ParticipantInline, MessageInline)
     actions = ("close_rooms",)
 
     @admin.action(description="Закрыть выбранные комнаты")
@@ -48,3 +57,16 @@ class ParticipantAdmin(admin.ModelAdmin):
     list_select_related = ("room", "user")
     readonly_fields = ("joined_at",)
     autocomplete_fields = ("user",)
+
+
+@admin.register(Message)
+class MessageAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "room", "author_name", "is_teacher", "short_body")
+    list_filter = ("is_teacher", "room__status")
+    search_fields = ("author_name", "body", "room__join_code")
+    list_select_related = ("room", "participant")
+    readonly_fields = ("created_at",)
+
+    @admin.display(description="текст")
+    def short_body(self, obj: Message) -> str:
+        return obj.body[:60]

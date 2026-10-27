@@ -53,3 +53,11 @@ def check_join_rate_limit(request) -> RateLimitResult:
         limit=settings.JOIN_RATE_LIMIT_ATTEMPTS,
         window=settings.JOIN_RATE_LIMIT_WINDOW,
     )
+
+
+def check_chat_rate_limit(room_id: int, connection_key: str) -> RateLimitResult:
+    return check_rate_limit(
+        f"chat:{room_id}:{connection_key}",
+        limit=settings.CHAT_RATE_LIMIT_MESSAGES,
+        window=settings.CHAT_RATE_LIMIT_WINDOW,
+    )

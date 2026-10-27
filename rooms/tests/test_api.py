@@ -62,3 +62,61 @@ def test_api_validates_title(client, owner):
 
     assert response.status_code == 400
     assert "title" in response.json()["errors"]
+
+
+def test_history_requires_membership(client, owner, other_teacher):
+    room = Room.objects.create(owner=owner, join_code="HIST01")
+    client.force_login(other_teacher)
+
+    response = client.get(reverse("api-room-history", kwargs={"join_code": room.join_code}))
+
+    assert response.status_code == 403
+
+
+def test_history_for_owner(client, owner):
+    from rooms.models import Message
+
+    room = Room.objects.create(owner=owner, join_code="HIST02")
+    Message.objects.create(room=room, author_name="Гость", body="один")
+    Message.objects.create(room=room, author_name="Гость", body="два")
+    client.force_login(owner)
+
+    response = client.get(reverse("api-room-history", kwargs={"join_code": room.join_code}))
+
+    assert response.status_code == 200
+    bodies = [m["body"] for m in response.json()["messages"]]
+    assert bodies == ["один", "два"]
+
+
+def test_history_after_message_id(client, owner):
+    from rooms.models import Message
+
+    room = Room.objects.create(owner=owner, join_code="HIST03")
+    first = Message.objects.create(room=room, author_name="Гость", body="один")
+    Message.objects.create(room=room, author_name="Гость", body="два")
+    client.force_login(owner)
+
+    response = client.get(
+        reverse("api-room-history", kwargs={"join_code": room.join_code}),
+        {"after_message_id": first.pk},
+    )
+
+    assert response.status_code == 200
+    assert [m["body"] for m in response.json()["messages"]] == ["два"]
+
+
+def test_history_available_to_guest_with_session(client, owner):
+    from rooms.models import Message
+    from rooms.services import GUEST_ROOMS_SESSION_KEY
+
+    room = Room.objects.create(owner=owner, join_code="HIST04")
+    Message.objects.create(room=room, author_name="Гость", body="вопрос")
+    session = client.session
+    # имитируем вход гостя: имя записано в сессию
+    session[GUEST_ROOMS_SESSION_KEY] = {room.join_code: {"name": "Гость", "room_id": room.pk}}
+    session.save()
+
+    response = client.get(reverse("api-room-history", kwargs={"join_code": room.join_code}))
+
+    assert response.status_code == 200
+    assert [m["body"] for m in response.json()["messages"]] == ["вопрос"]

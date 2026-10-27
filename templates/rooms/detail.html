@@ -44,6 +44,9 @@
                       data-copy-link data-copy-value="{{ join_url }}">
                 Скопировать ссылку
               </button>
+              <a class="button button-secondary" href="{% url 'rooms:live' join_code=room.join_code %}">
+                Открыть панель
+              </a>
               <a class="button button-secondary" href="{% url 'rooms:create' %}">Создать ещё</a>
               <span class="copy-status" data-copy-status aria-live="polite"></span>
             </div>

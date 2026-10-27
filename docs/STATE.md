@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A8 — RoomConsumer и presence: готов.**
+**A9 — чат: готов.**
 
 ## Что готово
 
@@ -71,9 +71,20 @@
 - **Ping/pong (заготовка A11):** `{type: ping}` → `{type: pong}`, продлевает TTL.
 - **ASGI:** `AuthMiddlewareStack` кладёт в scope сессию Django и пользователя —
   без этого `connect()` не видит гостевую сессию.
-- **Клиент комнаты (A8):** `frontend/room-socket.ts` подключается к WebSocket,
-  рисует список участников и статус соединения, шлёт `ping` раз в 20 с, не
-  переподключается на 4401/4403.
+- **Клиент комнаты (A8/A9):** `frontend/room-live.ts` подключается к WebSocket,
+  рисует участников, историю и чат, шлёт `ping` раз в 20 с, не переподключается
+  на 4401/4403.
+- **Чат (A9):** модель `rooms.Message` (`room`, `participant`, `author_name`,
+  `is_teacher`, `body`, `created_at`). Клиент шлёт `{type: chat, body}`, сервер
+  сохраняет и рассылает `chat_message` с `{id, user, body, ts, is_teacher}`.
+- **История (A9):** при подключении consumer присылает `chat_history` (последние
+  50 сообщений); `GET /api/rooms/<code>/history/?after_message_id=<id>` отдаёт
+  пропущенные сообщения для переподключения.
+- **Ограничения чата (A9):** текст нормализуется, максимум 500 символов, rate
+  limit `CHAT_RATE_LIMIT_MESSAGES`/`CHAT_RATE_LIMIT_WINDOW` на участника; при
+  превышении приходит `chat_error`.
+- **Панель преподавателя (A9):** `GET /rooms/<code>/live/` — QR, ID, чат и
+  участники в реальном времени; ссылка «Открыть панель» на странице комнаты.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -97,6 +108,8 @@
 | Вход студента по ссылке/QR | `GET/POST /r/<code>/` → `rooms.views.room_join` |
 | Комната студента | `GET /r/<code>/live/` → `rooms.views.room_student` |
 | WebSocket комнаты | `WS /ws/rooms/<code>/` → `rooms.consumers.RoomConsumer` |
+| Панель преподавателя | `GET /rooms/<code>/live/` → `rooms.views.room_live` |
+| История чата (API) | `GET /api/rooms/<code>/history/` → `rooms.api.chat_history_api` |
 | Админка | `GET /admin/` |
 | WebSocket-эхо (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
@@ -124,9 +137,10 @@
 - `rooms/tests/` — формат и алфавит `join_code`, автогенерация кода, уникальность
   среди открытых комнат, повторное использование после закрытия, идемпотентное
   закрытие, повторы сервиса при коллизии, QR и ссылка `/r/<code>/`, страницы
-  создания/просмотра комнаты, доступ по ролям, JSON API создания, вход студента
-  (гостевая сессия, 404/410/429, name-валидация), rate limit, модель участника,
-  `RoomConsumer` (изоляция комнат, 4401/4403, presence, второй участник, ping/pong).
+  создания/просмотра/панели комнаты, доступ по ролям, JSON API создания и истории,
+  вход студента (гостевая сессия, 404/410/429, name-валидация), rate limit, модель
+  участника, модель сообщения и сервисные функции чата, `RoomConsumer` (изоляция
+  комнат, 4401/4403, presence, ping/pong, чат, история, rate limit).
 - Тесты WebSocket синхронные: сценарий целиком выполняется в `asyncio.run`,
   `CHANNEL_LAYERS` на время теста подменяется на in-memory через `settings`.
 
@@ -169,24 +183,28 @@
   TTL, а не в отдельном Redis-множестве: так одна абстракция работает и с Redis, и
   с локальным кэшем. Участник онлайн, пока у него есть хотя бы одна вкладка
   (`count > 0`).
-- `RoomConsumer` не принимает `chat` и события фраз: это A9/A11. Сейчас он умеет
-  только `ping`/`pong` и рассылку `presence`.
+- `RoomConsumer` умеет `ping`/`pong`, `chat` и рассылку `presence`/`chat_message`.
+  События фраз (`asr_text`, `utterance`) появятся в блоке E, heartbeat — A11,
+  закрытие комнаты — A10.
+- Чат хранится в `rooms.Message`. Автор фиксируется в `author_name` (имя гостя
+  или имя преподавателя) и `is_teacher`, чтобы история читалась без join к User.
+- История отдаётся по возрастанию id: при подключении — последние 50, через
+  `?after_message_id` — только новые; клиент отсекает дубликаты по id.
 
-## Проверка A8
+## Проверка A9
 
 ```bash
-make check          # ruff + tsc + vite build + 88 тестов — зелёный
+make check          # ruff + tsc + vite build + 108 тестов — зелёный
 ```
 
-Тесты `WebsocketCommunicator` проверяют: гость с сессией подключается и получает
-`presence`; без сессии — 4401; неизвестная или закрытая комната — 4403; два гостя
-видят друг друга; владелец подключается как не-гость; presence очищается после
-отключения; `ping` → `pong`; гость одной комнаты не проходит в другую. Проверено
-вручную на in-memory и на Redis-кэше.
+Проверено вручную: при подключении приходит `chat_history`; сообщение гостя
+нормализуется («  Привет   всем  » → «Привет всем») и рассылается всем участникам;
+сообщение преподавателя помечено `is_teacher`; всё сохраняется в `rooms.Message`.
+API истории отдаёт сообщения владельцу/админу и гостю с сессией, 403 — постороннему.
 
 ## Дальше
 
-**A9 — чат:** модель `Message`, история, событие `chat_message`, интерфейс
-преподавателя и студента, догрузка по `last_message_id` при переподключении.
-Критерий: тесты consumer и views. Читать: `docs/spec/ws-events.md`,
-`docs/spec/requirements.md` (раздел 3.1), `docs/spec/db-schema.md`.
+**A10 — управление комнатой:** закрыть комнату, удалить участника, сменить ID.
+Критерий: старый ID и QR перестают работать, участники получают `room_closed`.
+Читать: `docs/spec/requirements.md` (раздел 3.1), `docs/spec/ws-events.md`,
+`docs/spec/db-schema.md`.
