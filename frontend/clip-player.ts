@@ -145,6 +145,28 @@ export class ClipPlayer {
     }
   }
 
+  /**
+   * Сменить скорость на ходу (C7): пересобрать план очереди под новую скорость,
+   * сохранив текущий клип и кадр. Играющая очередь продолжает идти, а не
+   * останавливается на начале.
+   */
+  setSpeed(speed: number): void {
+    if (!Number.isFinite(speed) || speed === this.options.speed) return;
+    this.options.speed = speed;
+    if (!this.plan || this.clips.length === 0) return;
+
+    const playing = this.isPlaying;
+    this.stop();
+    this.plan = planQueue(this.clips.map(toQueueClip), {
+      speed: this.options.speed,
+      crossfadeMs: this.options.crossfadeMs,
+      gapMs: this.options.gapMs,
+      mode: this.options.mode,
+    });
+    this.computeIntervals();
+    if (playing) this.start();
+  }
+
   /** Один шаг воспроизведения: показать текущий кадр и перейти к следующему. */
   tick(): void {
     if (this.clips.length === 0) return;

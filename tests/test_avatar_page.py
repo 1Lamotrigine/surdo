@@ -33,6 +33,14 @@ def test_avatar_page_renders(client):
     assert "data-avatar-phrase" in html
     assert "data-avatar-subtitles" in html
     assert "subtitle-size-large" in html
+    # C7: настройки студента — скорость, размер, положение и фон.
+    assert "data-avatar-settings" in html
+    assert "data-settings-speed" in html
+    assert "data-settings-size" in html
+    assert "data-settings-offset-x" in html
+    assert "data-settings-offset-y" in html
+    assert "data-settings-theme" in html
+    assert "data-settings-reset" in html
     # Точка входа клиента (собранный ассет или dev-сервер Vite).
     assert "avatar-page" in html
 

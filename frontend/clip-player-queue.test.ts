@@ -171,6 +171,22 @@ describe("ClipPlayer — очередь клипов", () => {
     expect(player.queue?.speed).toBe(1.3);
   });
 
+  it("меняет скорость на ходу, не перезапуская очередь (C7)", async () => {
+    const fake = makeFakeVrm();
+    const player = new ClipPlayer(fake.vrm, { smoothing: false });
+    player.loadQueue([await makeClip(30), await makeClip(30)]);
+    player.tick();
+    player.tick();
+    const frame = player.currentFrame;
+
+    player.setSpeed(1.2);
+
+    expect(player.clipCount).toBe(2);
+    expect(player.currentClip).toBe(0);
+    expect(player.currentFrame).toBe(frame);
+    expect(player.queue?.speed).toBe(1.2);
+  });
+
   it("ужимает crossfade для коротких клипов", async () => {
     const fake = makeFakeVrm();
     const player = new ClipPlayer(fake.vrm, { smoothing: false });

@@ -16,6 +16,13 @@ import {
   encodeNeutralPauseClip,
 } from "./demo-clip";
 import { DEMO_PHRASE, encodePhraseClips } from "./demo-phrase";
+import {
+  STUDENT_SETTINGS_DEFAULTS,
+  StudentSettingsView,
+  studentSettingsCss,
+  studentThemeBackground,
+  type StudentSettings,
+} from "./student-settings";
 import { SubtitleView, alignTokens, utteranceUnits, wordIndexForToken } from "./subtitles";
 
 const STATUS_LABELS: Record<AvatarStatus, string> = {
@@ -48,6 +55,7 @@ function setupAvatarPage(root: HTMLElement): void {
   const dactylButton = root.querySelector<HTMLButtonElement>("[data-avatar-dactyl]");
   const phraseButton = root.querySelector<HTMLButtonElement>("[data-avatar-phrase]");
   const subtitleRoot = root.querySelector<HTMLElement>("[data-avatar-subtitles]");
+  const settingsRoot = root.querySelector<HTMLElement>("[data-avatar-settings]");
   const fileInput = root.querySelector<HTMLInputElement>("[data-avatar-file]");
   const clipStatus = root.querySelector<HTMLElement>("[data-clip-status]");
   if (!stage) return;
@@ -73,6 +81,20 @@ function setupAvatarPage(root: HTMLElement): void {
   // Соответствие «индекс клипа → слово субтитра» для текущей фразы.
   let phraseWordByClip: number[] = [];
 
+  // Настройки студента (C7): скорость, размер, положение и фон аватара.
+  let settingsView: StudentSettingsView | null = null;
+  let lastSettingsSpeed = STUDENT_SETTINGS_DEFAULTS.speed;
+
+  const applyStudentSettings = (settings: StudentSettings): void => {
+    // Размер/сдвиг — CSS-переменные сцены (значения живут в CSS), фон — цвет
+    // сцены Three.js, чтобы он совпадал с подложкой вокруг canvas.
+    for (const [name, value] of Object.entries(studentSettingsCss(settings))) {
+      stage.style.setProperty(name, value);
+    }
+    avatar.setBackground(studentThemeBackground(settings.theme));
+    subtitles?.applyStyles({ size: "large", theme: settings.theme });
+  };
+
   const highlightClip = (index: number): void => {
     const wordIndex = phraseWordByClip[index] ?? -1;
     subtitles?.highlight(wordIndex);
@@ -83,11 +105,13 @@ function setupAvatarPage(root: HTMLElement): void {
   let queue: DecodedClip[] = [];
   let queueConfig: QueueConfig = { mode: "phrase", label: "Очередь" };
 
-  /** Прочитать скорость и паузу из полей страницы. */
+  /** Прочитать скорость из настроек студента и паузу из поля страницы. */
   const readPlayerOptions = (): { speed: number; gapMs: number } => {
-    const speed = speedInput ? Number.parseFloat(speedInput.value) : 1;
+    const settingsSpeed = settingsView?.settings.speed;
+    const fieldSpeed = speedInput ? Number.parseFloat(speedInput.value) : Number.NaN;
+    const speed = settingsSpeed ?? (Number.isFinite(fieldSpeed) ? fieldSpeed : 1);
     const gapMs = gapInput ? Number.parseFloat(gapInput.value) : 0;
-    return { speed: Number.isFinite(speed) ? speed : 1, gapMs: Number.isFinite(gapMs) ? gapMs : 0 };
+    return { speed, gapMs: Number.isFinite(gapMs) ? gapMs : 0 };
   };
 
   const ensurePlayer = (): ClipPlayer | null => {
@@ -266,6 +290,21 @@ function setupAvatarPage(root: HTMLElement): void {
       setClipStatus(`Битый клип: ${String(error)}`);
     }
   });
+
+  // Настройки студента (C7) применяются сразу и переживают перезагрузку страницы.
+  if (settingsRoot) {
+    settingsView = new StudentSettingsView(settingsRoot, {
+      onChange: (settings) => {
+        applyStudentSettings(settings);
+        if (settings.speed === lastSettingsSpeed) return;
+        lastSettingsSpeed = settings.speed;
+        // Скорость входит в план очереди C4: игрок пересобирает его на ходу,
+        // сохраняя текущий клип и кадр (если он уже создан).
+        player?.setSpeed(settings.speed);
+        if (queue.length > 0) setClipStatus(`Скорость ${settings.speed.toFixed(2)}x.`);
+      },
+    });
+  }
 
   // Освобождаем WebGL при уходе со страницы (переход назад, закрытие вкладки).
   window.addEventListener(

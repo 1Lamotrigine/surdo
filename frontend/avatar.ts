@@ -146,6 +146,11 @@ export class Avatar {
     return this.vrm;
   }
 
+  /** Сменить цвет фона сцены (C7: тёмный/светлый фон — FR-13). */
+  setBackground(background: THREE.ColorRepresentation): void {
+    this.scene.background = new THREE.Color(background);
+  }
+
   /** Поставить модель в нейтральную позу (rest pose самой модели). */
   setNeutralPose(vrm: VRM | null = this.vrm): void {
     if (!vrm) return;
