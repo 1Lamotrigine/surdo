@@ -1,0 +1,12 @@
+:80 {
+	encode zstd gzip
+
+	handle /media/* {
+		root * /srv
+		file_server
+	}
+
+	handle {
+		reverse_proxy web:8000
+	}
+}

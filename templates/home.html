@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}ИИ-аватар сурдопереводчик для лекций{% endblock %}
+
+{% block content %}
+  <section class="hero">
+    <p class="eyebrow">Каркас проекта · этап A1</p>
+    <h1>Лекция с аватаром<br>и субтитрами</h1>
+    <p class="lead">
+      Преподаватель говорит в микрофон, аватар в браузере показывает фразу жестами,
+      студенты читают субтитры и задают вопросы в чат. Ничего устанавливать не нужно.
+    </p>
+  </section>
+
+  <section class="cards" aria-label="Что уже готово и что дальше">
+    <article class="card">
+      <h2>Готово</h2>
+      <ul>
+        <li>Django-проект и приложения <code>accounts</code>, <code>rooms</code>, <code>dictionary</code>, <code>pipeline</code>, <code>services</code>.</li>
+        <li>Настройки из переменных окружения.</li>
+        <li>Docker Compose: web, PostgreSQL, Redis, Caddy.</li>
+        <li><code>make check</code>: ruff и pytest.</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h2>Дальше</h2>
+      <ul>
+        <li>A2 — WebSocket и Channels.</li>
+        <li>A3 — Vite, HTMX и клиентские модули.</li>
+        <li>A4–A7 — роли, комнаты, QR и вход по ID.</li>
+      </ul>
+    </article>
+
+    <article class="card muted">
+      <h2>Демо-режим</h2>
+      <p>
+        До появления проверенных жестов словаря включён демо-режим комнаты с заметной
+        пометкой: «прототип, жест не проверен носителем».
+      </p>
+    </article>
+  </section>
+{% endblock %}

@@ -1,0 +1,23 @@
+[project]
+name = "gluho-nemye"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+description = "ИИ-аватар сурдопереводчик для лекций"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests", "accounts", "rooms", "dictionary", "pipeline", "services"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [".venv", "staticfiles", "media"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["accounts", "config", "dictionary", "pipeline", "rooms", "services"]

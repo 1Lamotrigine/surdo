@@ -1,0 +1,90 @@
+# AGENTS.md — правила работы ИИ-агента
+
+Проект: ИИ-аватар сурдопереводчик для лекций (веб, русская речь и РЖЯ).
+Читай этот файл и `docs/STATE.md` в начале каждой сессии. В конце этапа обновляй
+`docs/STATE.md`.
+
+## Зафиксированные версии (не обновлять без запроса человека)
+
+| Компонент | Версия |
+| --- | --- |
+| Python | 3.12 (3.12.11 локально, образ `python:3.12-slim`) |
+| Django | 5.2.18 (LTS) |
+| Channels / channels-redis | 4.3.2 / 4.3.0 |
+| uvicorn | 0.54.0 |
+| PostgreSQL | 16 |
+| Redis | 7 |
+| Caddy | 2 |
+| Node.js (этап A3) | 22 LTS |
+| pytest / pytest-django / ruff | 9.1.1 / 4.14.0 / 0.17.3 |
+
+Версии зафиксированы в `requirements.txt`, `requirements-dev.txt` и Docker-образах.
+
+## Структура
+
+```
+app/
+├── manage.py
+├── config/          # настройки, urls, asgi/wsgi, служебные views
+├── accounts/        # пользователь и роли, вход (A4)
+├── rooms/           # комнаты, участники, чат, consumer, QR (A5-A11)
+├── dictionary/      # жесты, клипы, версии словаря, ревью (блок B)
+├── pipeline/        # приём фразы, Utterance, метрики (блок E)
+├── services/        # pure-Python: asr, gloss, compress (блок F)
+├── frontend/        # JS-модули и Vite (появится на A3)
+├── templates/       # Django-шаблоны + HTMX
+├── static/          # статика проекта
+├── tests/           # сквозные тесты проекта
+├── docs/spec/       # выжимки из ТЗ по разделам
+├── docs/STATE.md    # состояние проекта
+├── docker-compose.yml, Dockerfile, Caddyfile
+└── Makefile, .env.example
+```
+
+## Правила
+
+- Views тонкие, логика — в сервисных функциях приложения. Приложения вызывают друг
+  друга только через публичные функции.
+- В async-коде нет блокирующих вызовов: ORM только через `database_sync_to_async`
+  или async-методы, Whisper и LLM — через `asyncio.to_thread`.
+- Новые зависимости добавляются только по явной просьбе человека.
+- Перед использованием API библиотеки читай её документацию и исходники в
+  `site-packages` / `node_modules`, а не пиши по памяти.
+- Тесты пишутся вместе с кодом: pytest (позже vitest). Этап закрыт только когда
+  зелёный `make check`.
+- Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
+- Один этап — одна ветка и один коммит.
+- Секреты только в `.env` (не коммитится). `.env.example` обновляется при
+  добавлении переменных.
+
+## Команды
+
+```bash
+make setup     # .env + venv + зависимости (нужен uv)
+make check     # ruff check + pytest; поднимает контейнер db
+make up        # docker compose up --build (Caddy на :80)
+make migrate   # миграции внутри web
+```
+
+`make test` использует PostgreSQL из compose на `127.0.0.1:55432` (не 5432, чтобы
+не конфликтовать с локальной базой). Внутри compose база доступна как `db:5432`.
+
+## Спецификация
+
+Полное ТЗ лежит в `../TZ_django.md`. Для этапов читай только нужные файлы
+`docs/spec/`:
+
+| Файл | Содержание |
+| --- | --- |
+| `overview.md` | цель, роли, сценарии |
+| `requirements.md` | FR-1…FR-27 |
+| `nfr.md` | НФТ, критерии приёмки, безопасность |
+| `architecture.md` | архитектура, поток данных, очереди |
+| `project-structure.md` | приложения и правила кода |
+| `stack.md` | стек, окружение, docker-compose |
+| `api.md` | сервисные модули и HTTP API |
+| `ws-events.md` | WebSocket-события и протокол |
+| `gloss-format.md` | формат глосс |
+| `clip-format.md` | формат клипа и воспроизведение |
+| `db-schema.md` | схема БД |
+| `dictionary-process.md` | процесс создания словаря |
