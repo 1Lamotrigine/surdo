@@ -8,7 +8,7 @@ DB_PASSWORD ?= change-me
 -include .env
 export
 
-.PHONY: help check lint format test env setup up down logs migrate makemigrations shell createsuperuser client-build client-typecheck client-dev
+.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-dev
 
 help:
 	@echo "make setup           — .env, venv, Python- и npm-зависимости"
@@ -16,6 +16,7 @@ help:
 	@echo "make up              — собрать и запустить весь стек (web, db, redis, caddy)"
 	@echo "make down            — остановить стек"
 	@echo "make migrate         — применить миграции"
+	@echo "make seed-admin      — создать/обновить администратора из ADMIN_*"
 	@echo "make env             — создать .env из .env.example"
 	@echo "make client-dev      — Vite dev-сервер с HMR на :5173"
 	@echo "make client-build    — production-сборка в static/dist"
@@ -69,6 +70,9 @@ logs:
 
 migrate:
 	$(COMPOSE) exec web python manage.py migrate
+
+seed-admin:
+	$(COMPOSE) exec web python manage.py seed_admin
 
 makemigrations:
 	$(COMPOSE) exec web python manage.py makemigrations

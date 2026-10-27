@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Вход · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="auth-card">
+    <p class="eyebrow">Аккаунт</p>
+    <h1>Вход</h1>
+    <p class="lead">
+      Вход по email и паролю для преподавателей, редакторов словаря и экспертов-носителей.
+    </p>
+
+    <form class="auth-form" method="post" novalidate>
+      {% csrf_token %}
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      {% include "accounts/_form_fields.html" %}
+      <button class="button" type="submit">Войти</button>
+    </form>
+
+    <p class="auth-switch">
+      Нет аккаунта? <a href="{% url 'accounts:register' %}">Зарегистрироваться</a>.
+    </p>
+  </section>
+{% endblock %}

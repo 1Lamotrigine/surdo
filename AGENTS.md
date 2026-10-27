@@ -56,6 +56,9 @@ app/
   `site-packages` / `node_modules`, а не пиши по памяти.
 - Тесты пишутся вместе с кодом: pytest (позже vitest). Этап закрыт только когда
   зелёный `make check`.
+- Аутентификация — по email (`AUTH_USER_MODEL = "accounts.User"`). Публичная
+  регистрация создаёт только `teacher`; роли editor/expert/admin назначает
+  администратор в Django Admin, не форма регистрации.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при
@@ -68,6 +71,7 @@ make setup     # .env + venv + Python- и npm-зависимости
 make check     # ruff + tsc + pytest + vite build; поднимает контейнер db
 make up        # docker compose up --build (Caddy на :80)
 make migrate   # миграции внутри web
+make seed-admin # создать/обновить администратора из ADMIN_* в .env
 make client-dev # Vite dev-сервер с HMR на :5173
 make client-build # production-сборка в static/dist
 ```

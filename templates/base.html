@@ -14,12 +14,35 @@
     <header class="site-header">
       <div class="wrap header-inner">
         <a class="brand" href="/">Жест<span>·</span>Прототип</a>
-        <div class="badges">
-          <span class="badge">MVP · русский / РЖЯ</span>
-          <span class="badge client-badge" data-client-status data-state="loading" aria-live="polite">Клиент: загрузка…</span>
+        <div class="header-actions">
+          <div class="badges">
+            <span class="badge">MVP · русский / РЖЯ</span>
+            <span class="badge client-badge" data-client-status data-state="loading" aria-live="polite">Клиент: загрузка…</span>
+          </div>
+          <nav class="auth-nav" aria-label="Аккаунт">
+            {% if user.is_authenticated %}
+              <span class="auth-name">{{ user.name|default:user.email }}</span>
+              <span class="badge">{{ user.get_role_display }}</span>
+              <form class="logout-form" action="{% url 'accounts:logout' %}" method="post">
+                {% csrf_token %}
+                <button class="link-button" type="submit">Выйти</button>
+              </form>
+            {% else %}
+              <a href="{% url 'accounts:login' %}">Войти</a>
+              <a href="{% url 'accounts:register' %}">Регистрация</a>
+            {% endif %}
+          </nav>
         </div>
       </div>
     </header>
+
+    {% if messages %}
+      <ul class="messages wrap" role="status">
+        {% for message in messages %}
+          <li class="message message-{{ message.tags|default:'info' }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
 
     <main id="main" class="wrap">
       {% block content %}{% endblock %}
