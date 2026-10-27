@@ -17,7 +17,7 @@ import type { VRM } from "@pixiv/three-vrm";
 
 import type { DecodedClip } from "./clip";
 import { crossfade, fadeToNeutral, neutralFrame } from "./clip-blend";
-import { planQueue, toQueueClip, type QueuePlan } from "./clip-queue";
+import { planQueue, toQueueClip, type CrossfadeMode, type QueuePlan } from "./clip-queue";
 import { OneEuroLandmarks } from "./one-euro";
 import { retargetParts, splitFrame, type RetargetedFrame } from "./retarget";
 import { applyRetargetedFrame, resetToNeutral } from "./vrm-rig";
@@ -33,6 +33,8 @@ export type ClipPlayerOptions = {
   smoothing?: boolean;
   /** Длина crossfade между клипами, мс (150–250, ТЗ 5.4). */
   crossfadeMs?: number;
+  /** Режим склейки: `phrase` или `dactyl` (укороченный переход, C5). */
+  mode?: CrossfadeMode;
   /** Пауза в нейтральной позе между фразами, мс. */
   gapMs?: number;
   /** Вызывается после последнего кадра (если `loop` выключен). */
@@ -100,6 +102,7 @@ export class ClipPlayer {
             speed: this.options.speed,
             crossfadeMs: this.options.crossfadeMs,
             gapMs: this.options.gapMs,
+            mode: this.options.mode,
           })
         : null;
     this.computeIntervals();

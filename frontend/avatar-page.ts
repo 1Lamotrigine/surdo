@@ -7,12 +7,26 @@
 import { Avatar, type AvatarStatus } from "./avatar";
 import { decodeClip, decodeClipPayload, type DecodedClip } from "./clip";
 import { ClipPlayer } from "./clip-player";
-import { encodeDemoClip, encodeDemoQueue } from "./demo-clip";
+import { DACTYL_CROSSFADE_MS } from "./clip-queue";
+import { DACTYL_ALPHABET, splitWord } from "./dactyl";
+import {
+  encodeDactylClip,
+  encodeDemoClip,
+  encodeDemoQueue,
+  encodeNeutralPauseClip,
+} from "./demo-clip";
 
 const STATUS_LABELS: Record<AvatarStatus, string> = {
   loading: "Загрузка…",
   ready: "Готово",
   error: "Ошибка",
+};
+
+/** Режим очереди: обычная фраза (C4) или склейка слова по буквам (C5). */
+type QueueConfig = {
+  mode: "phrase" | "dactyl";
+  crossfadeMs?: number;
+  label: string;
 };
 
 function setupAvatarPage(root: HTMLElement): void {
@@ -26,6 +40,8 @@ function setupAvatarPage(root: HTMLElement): void {
   const stopButton = root.querySelector<HTMLButtonElement>("[data-avatar-stop]");
   const speedInput = root.querySelector<HTMLInputElement>("[data-avatar-speed]");
   const gapInput = root.querySelector<HTMLInputElement>("[data-avatar-gap]");
+  const dactylInput = root.querySelector<HTMLInputElement>("[data-avatar-dactyl-text]");
+  const dactylButton = root.querySelector<HTMLButtonElement>("[data-avatar-dactyl]");
   const fileInput = root.querySelector<HTMLInputElement>("[data-avatar-file]");
   const clipStatus = root.querySelector<HTMLElement>("[data-clip-status]");
   if (!stage) return;
@@ -49,6 +65,7 @@ function setupAvatarPage(root: HTMLElement): void {
   // Игрок создаётся после загрузки модели: он привязан к конкретному VRM.
   let player: ClipPlayer | null = null;
   let queue: DecodedClip[] = [];
+  let queueConfig: QueueConfig = { mode: "phrase", label: "Очередь" };
 
   /** Прочитать скорость и паузу из полей страницы. */
   const readPlayerOptions = (): { speed: number; gapMs: number } => {
@@ -69,17 +86,20 @@ function setupAvatarPage(root: HTMLElement): void {
         loop: false,
         speed,
         gapMs,
-        onEnd: () => setClipStatus("Очередь проиграна."),
-        onClip: (index) => setClipStatus(`Клип ${index + 1} из ${queue.length}…`),
+        mode: queueConfig.mode,
+        crossfadeMs: queueConfig.crossfadeMs,
+        onEnd: () => setClipStatus(`${queueConfig.label}: проиграно.`),
+        onClip: (index) => setClipStatus(`${queueConfig.label}: клип ${index + 1} из ${queue.length}…`),
       });
     }
     return player;
   };
 
-  /** Загрузить очередь клипов в игрока (с пересозданием под новые скорость/паузу). */
-  const loadQueue = (decoded: DecodedClip[], label: string): void => {
+  /** Загрузить очередь клипов в игрока (с пересозданием под новые настройки). */
+  const loadQueue = (decoded: DecodedClip[], config: QueueConfig): void => {
     queue = decoded;
-    // Скорость и пауза могли измениться — пересоздаём игрок, чтобы он взял их.
+    queueConfig = config;
+    // Режим/скорость/пауза могли измениться — пересоздаём игрок, чтобы он взял их.
     player?.dispose();
     player = null;
     const activePlayer = ensurePlayer();
@@ -87,7 +107,7 @@ function setupAvatarPage(root: HTMLElement): void {
     activePlayer.loadQueue(decoded);
     const total = decoded.reduce((sum, clip) => sum + clip.frames / clip.fps, 0);
     setClipStatus(
-      `${label}: ${decoded.length} клип(ов), ${decoded.reduce((n, c) => n + c.frames, 0)} кадров, ` +
+      `${config.label}: ${decoded.length} клип(ов), ${decoded.reduce((n, c) => n + c.frames, 0)} кадров, ` +
         `${total.toFixed(2)} с. Нажмите «Играть».`,
     );
   };
@@ -111,7 +131,7 @@ function setupAvatarPage(root: HTMLElement): void {
     setClipStatus("Сборка демо-клипа…");
     try {
       const payload = await encodeDemoClip();
-      loadQueue([await decodeClipPayload(payload)], "Демо-клип");
+      loadQueue([await decodeClipPayload(payload)], { mode: "phrase", label: "Демо-клип" });
     } catch (error) {
       setClipStatus(`Не удалось собрать клип: ${String(error)}`);
     }
@@ -122,11 +142,48 @@ function setupAvatarPage(root: HTMLElement): void {
     try {
       const payloads = await encodeDemoQueue();
       const decoded = await Promise.all(payloads.map((payload) => decodeClipPayload(payload)));
-      loadQueue(decoded, "Очередь демо-клипов (crossfade + нейтраль)");
+      loadQueue(decoded, { mode: "phrase", label: "Очередь демо-клипов" });
       player?.start();
       if (player) setClipStatus("Очередь демо-клипов: воспроизведение…");
     } catch (error) {
       setClipStatus(`Не удалось собрать очередь: ${String(error)}`);
+    }
+  });
+
+  dactylButton?.addEventListener("click", async () => {
+    const text = dactylInput?.value.trim() ?? "";
+    if (!text) {
+      setClipStatus("Введите слово для дактиля.");
+      return;
+    }
+    setClipStatus("Сборка дактиля…");
+    try {
+      const chars = splitWord(text);
+      if (chars.length === 0) {
+        setClipStatus("Нет букв для дактиля (только кириллица и цифры).");
+        return;
+      }
+      // На каждый знак — клип: буква/цифра из синтетической азбуки, пробел —
+      // короткий клип нейтральной позы (пауза между словами).
+      const decoded = await Promise.all(
+        chars.map(async (char) =>
+          decodeClipPayload(
+            char.kind === "space"
+              ? await encodeNeutralPauseClip()
+              : await encodeDactylClip(char.char, DACTYL_ALPHABET),
+          ),
+        ),
+      );
+      const letters = chars.filter((c) => c.kind !== "space").length;
+      loadQueue(decoded, {
+        mode: "dactyl",
+        crossfadeMs: DACTYL_CROSSFADE_MS,
+        label: `Дактиль «${text}» (${letters} букв)`,
+      });
+      player?.start();
+      if (player) setClipStatus(`Дактиль «${text}»: воспроизведение по буквам…`);
+    } catch (error) {
+      setClipStatus(`Не удалось собрать дактиль: ${String(error)}`);
     }
   });
 
@@ -153,7 +210,7 @@ function setupAvatarPage(root: HTMLElement): void {
       const decoded = await Promise.all(
         files.map(async (file) => decodeClip(new Uint8Array(await file.arrayBuffer()))),
       );
-      loadQueue(decoded, `Файлы: ${files.map((f) => f.name).join(", ")}`);
+      loadQueue(decoded, { mode: "phrase", label: `Файлы: ${files.map((f) => f.name).join(", ")}` });
       player?.start();
     } catch (error) {
       setClipStatus(`Битый клип: ${String(error)}`);

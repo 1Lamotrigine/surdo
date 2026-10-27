@@ -26,6 +26,9 @@ def test_avatar_page_renders(client):
     assert "data-avatar-queue" in html
     assert "data-avatar-speed" in html
     assert "data-avatar-gap" in html
+    # C5: дактиль — ввод слова и показ по буквам.
+    assert "data-avatar-dactyl" in html
+    assert "data-avatar-dactyl-text" in html
     # Точка входа клиента (собранный ассет или dev-сервер Vite).
     assert "avatar-page" in html
 

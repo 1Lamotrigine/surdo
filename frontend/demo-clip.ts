@@ -165,6 +165,62 @@ function demoValues(frames: number, variant = 0): number[] {
   return values;
 }
 
+/** Кисть (21 точка): какие пальцы выпрямлены (`extended`), остальные сложены. */
+function handFramePattern(extended: boolean[], side: "left" | "right"): Point[] {
+  const sign = side === "right" ? 1 : -1;
+  const lm: Point[] = Array.from({ length: HAND }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  const set = (i: number, x: number, y: number) => at(lm, i, { x, y, z: 0 });
+
+  set(0, 0.4, 0.2);
+  // Пальцы: большой, указательный, средний, безымянный, мизинец.
+  const fingers: [number, number, number, number, number][] = [
+    [1, 2, 3, 4, 0.06],
+    [5, 6, 7, 8, 0.02],
+    [9, 10, 11, 12, 0.0],
+    [13, 14, 15, 16, -0.02],
+    [17, 18, 19, 20, -0.04],
+  ];
+  fingers.forEach(([mcp, pip, dip, tip, offset], index) => {
+    const x = 0.4 + sign * offset;
+    const up = extended[index] ? 1 : 0;
+    set(mcp, x, 0.2);
+    // up=1 — палец выпрямлен вверх, up=0 — согнут к ладони.
+    set(pip, x, 0.2 - 0.03 * up);
+    set(dip, x, 0.2 - 0.05 * up);
+    set(tip, x, 0.2 - 0.07 * up);
+  });
+  return lm;
+}
+
+/**
+ * Форма пальцев для буквы дактиля: битовая маска из индекса в алфавите.
+ * Точные артикуляции РЖЯ задаст эксперт (клипы пишет блок D); здесь важно, что
+ * разные буквы выглядят по-разному, чтобы ручная проверка склейки была наглядной.
+ */
+export function dactylFingerPattern(char: string, alphabet: readonly string[]): boolean[] {
+  const up = char.toUpperCase();
+  const index = alphabet.indexOf(up);
+  // Цифры: индекс по смещению в кодовой таблице; неизвестный символ — 0.
+  const base = index >= 0 ? index + 1 : up.charCodeAt(0) % 31;
+  return Array.from({ length: 5 }, (_, bit) => ((base >> bit) & 1) === 1 || bit === 1);
+}
+
+/** Кадры буквы дактиля: держим форму пальцев, чуть покачивая кистью. */
+function dactylValues(char: string, alphabet: readonly string[], frames: number): number[] {
+  const pattern = dactylFingerPattern(char, alphabet);
+  const values: number[] = [];
+  for (let f = 0; f < frames; f += 1) {
+    const wave = 0.1 * Math.sin((f / frames) * Math.PI);
+    values.push(
+      ...flatten(poseFrame(0.5 + wave)),
+      ...flatten(handFramePattern(pattern, "left")),
+      ...flatten(handFramePattern(pattern, "right")),
+      ...flatten(faceFrame()),
+    );
+  }
+  return values;
+}
+
 /** Записать числа как Float16 (little-endian). */
 function encodeFloat16(values: number[]): Uint8Array {
   const buffer = new ArrayBuffer(values.length * 2);
@@ -213,6 +269,69 @@ export async function encodeDemoQueue(): Promise<Record<string, unknown>[]> {
     { frames: 50, variant: 2 },
   ];
   return Promise.all(specs.map((spec) => encodeDemoClip(spec.frames, 30, spec.variant)));
+}
+
+/** Число кадров синтетического клипа буквы дактиля (короткая поза). */
+export const DACTYL_DEMO_FRAMES = 8;
+
+/**
+ * Собрать синтетический клип буквы дактиля (C5): форма пальцев зависит от буквы.
+ * Реальные клипы букв пишет инструмент редактора (блок D); здесь — заготовка для
+ * ручной проверки склейки слова по буквам.
+ */
+export async function encodeDactylClip(
+  char: string,
+  alphabet: readonly string[],
+  frames = DACTYL_DEMO_FRAMES,
+  fps = 30,
+): Promise<Record<string, unknown>> {
+  const values = dactylValues(char, alphabet, frames);
+  const compressed = await gzip(encodeFloat16(values));
+  return {
+    version: 1,
+    gloss: `ДАКТИЛЬ_${char.toUpperCase()}`,
+    fps,
+    frames,
+    layout: DEMO_LAYOUT,
+    data: bytesToBase64(compressed),
+  };
+}
+
+/**
+ * Собрать клипы для слова по знакам дактиля: по клипу на букву/цифру, в порядке
+ * показа (C5). Резолвер `buildDactylQueue` потом сопоставит знак клипу.
+ */
+export async function encodeDactylWord(
+  chars: readonly string[],
+  alphabet: readonly string[],
+): Promise<Record<string, unknown>[]> {
+  return Promise.all(chars.map((char) => encodeDactylClip(char, alphabet)));
+}
+
+/**
+ * Собрать синтетический клип нейтральной позы (пауза между словами дактиля,
+ * C5): руки опущены, пальцы расслаблены. В очереди такой клип играет роль
+ * пробела — между словами аватар возвращается в покой.
+ */
+export async function encodeNeutralPauseClip(frames = 10, fps = 30): Promise<Record<string, unknown>> {
+  const values: number[] = [];
+  for (let f = 0; f < frames; f += 1) {
+    values.push(
+      ...flatten(poseFrame(0)),
+      ...flatten(handFrame(0.5, "left")),
+      ...flatten(handFrame(0.5, "right")),
+      ...flatten(faceFrame()),
+    );
+  }
+  const compressed = await gzip(encodeFloat16(values));
+  return {
+    version: 1,
+    gloss: "ПАУЗА",
+    fps,
+    frames,
+    layout: DEMO_LAYOUT,
+    data: bytesToBase64(compressed),
+  };
 }
 
 /** gzip через нативный `CompressionStream`. */

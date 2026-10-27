@@ -6,7 +6,16 @@
 import { describe, expect, it } from "vitest";
 
 import { decodeClipPayload } from "./clip";
-import { DEMO_LAYOUT, encodeDemoClip, encodeDemoQueue } from "./demo-clip";
+import { DACTYL_ALPHABET } from "./dactyl";
+import {
+  DACTYL_DEMO_FRAMES,
+  DEMO_LAYOUT,
+  encodeDactylClip,
+  encodeDactylWord,
+  encodeDemoClip,
+  encodeDemoQueue,
+  encodeNeutralPauseClip,
+} from "./demo-clip";
 import { retargetFrame } from "./retarget";
 
 describe("encodeDemoClip", () => {
@@ -75,5 +84,37 @@ describe("encodeDemoClip", () => {
       expect(clip.version).toBe(1);
       expect(retargetFrame(clip, 0).hasPose).toBe(true);
     }
+  });
+
+  it("encodeDactylClip собирает клип буквы с глоссой ДАКТИЛЬ_ (C5)", async () => {
+    const payload = await encodeDactylClip("а", DACTYL_ALPHABET);
+    expect(payload.gloss).toBe("ДАКТИЛЬ_А");
+    expect(payload.version).toBe(1);
+
+    const clip = await decodeClipPayload(payload);
+    expect(clip.frames).toBe(DACTYL_DEMO_FRAMES);
+    expect(retargetFrame(clip, 0).hasPose).toBe(true);
+  });
+
+  it("разные буквы дают разные формы пальцев", async () => {
+    const [a, zh] = await Promise.all([
+      encodeDactylClip("А", DACTYL_ALPHABET).then(decodeClipPayload),
+      encodeDactylClip("Ж", DACTYL_ALPHABET).then(decodeClipPayload),
+    ]);
+    // Форма пальцев отличается, поэтому данные клипов не совпадают.
+    expect(a.data).not.toEqual(zh.data);
+  });
+
+  it("encodeNeutralPauseClip даёт клип паузы", async () => {
+    const clip = await decodeClipPayload(await encodeNeutralPauseClip());
+    expect(clip.frames).toBe(10);
+    expect(retargetFrame(clip, 0).hasPose).toBe(true);
+  });
+
+  it("encodeDactylWord собирает клип на каждый знак", async () => {
+    const payloads = await encodeDactylWord(["И", "В", "А"], DACTYL_ALPHABET);
+    expect(payloads).toHaveLength(3);
+    expect(payloads[0].gloss).toBe("ДАКТИЛЬ_И");
+    expect(payloads[2].gloss).toBe("ДАКТИЛЬ_А");
   });
 });

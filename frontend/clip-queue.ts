@@ -38,6 +38,12 @@ export const MAX_CROSSFADE_MS = 250;
 /** Длина crossfade для склейки букв дактиля (ТЗ 5.4: укороченный блендинг). */
 export const DACTYL_CROSSFADE_MS = 80;
 
+/** Минимальная длина crossfade для дактиля, мс (ниже общей границы 150). */
+export const MIN_DACTYL_CROSSFADE_MS = 0;
+
+/** Режим склейки: обычная фраза или слово по буквам (дактиль). */
+export type CrossfadeMode = "phrase" | "dactyl";
+
 /** Длительность перехода в нейтральную позу в начале и конце очереди, мс. */
 export const NEUTRAL_FADE_MS = 150;
 
@@ -90,16 +96,24 @@ export type QueuePlan = {
   crossfadeMs: number;
   /** Пауза в нейтральной позе между фразами, мс. */
   gapMs: number;
+  /** Режим склейки (`phrase` или `dactyl`). */
+  mode: CrossfadeMode;
 };
 
 /** Параметры планирования. */
 export type QueuePlanOptions = {
   /** Скорость воспроизведения; зажимается в [0.6, 1.3]. */
   speed?: number;
-  /** Длина crossfade, мс; зажимается в [150, 250] (дактиль задаёт свою длину). */
+  /** Длина crossfade, мс; зажимается в [150, 250] (дактиль — в [0, 250]). */
   crossfadeMs?: number;
   /** Пауза в нейтральной позе между фразами, мс. */
   gapMs?: number;
+  /**
+   * Режим склейки: `phrase` (обычная фраза, переход 150–250 мс) или `dactyl`
+   * (слово по буквам — укороченный переход 0–250 мс, ТЗ 5.4). Влияет только на
+   * нижнюю границу `crossfadeMs`.
+   */
+  mode?: CrossfadeMode;
 };
 
 /** Зажать значение в диапазон. */
@@ -113,10 +127,22 @@ export function clampSpeed(speed: number): number {
   return clamp(speed, MIN_SPEED, MAX_SPEED);
 }
 
-/** Зажать длину crossfade в диапазон 150–250 мс. */
+/** Зажать длину crossfade в диапазон 150–250 мс (обычная фраза). */
 export function clampCrossfade(ms: number): number {
   if (!Number.isFinite(ms)) return DEFAULT_CROSSFADE_MS;
   return clamp(ms, MIN_CROSSFADE_MS, MAX_CROSSFADE_MS);
+}
+
+/**
+ * Зажать длину crossfade с учётом режима: для дактиля нижняя граница 0 (переход
+ * может быть короче 150 мс — буквы склеиваются почти вплотную), верхняя — 250.
+ */
+export function clampCrossfadeFor(ms: number, mode: CrossfadeMode = "phrase"): number {
+  if (!Number.isFinite(ms)) {
+    return mode === "dactyl" ? DACTYL_CROSSFADE_MS : DEFAULT_CROSSFADE_MS;
+  }
+  const min = mode === "dactyl" ? MIN_DACTYL_CROSSFADE_MS : MIN_CROSSFADE_MS;
+  return clamp(ms, min, MAX_CROSSFADE_MS);
 }
 
 /** Длительность клипа в секундах при скорости 1x. */
@@ -135,8 +161,10 @@ function clipDuration(clip: QueueClip): number {
  * автоматически ужимается.
  */
 export function planQueue(clips: QueueClip[], options: QueuePlanOptions = {}): QueuePlan {
+  const mode = options.mode ?? "phrase";
   const speed = clampSpeed(options.speed ?? 1);
-  const crossfadeMs = clampCrossfade(options.crossfadeMs ?? DEFAULT_CROSSFADE_MS);
+  const fallbackCrossfade = mode === "dactyl" ? DACTYL_CROSSFADE_MS : DEFAULT_CROSSFADE_MS;
+  const crossfadeMs = clampCrossfadeFor(options.crossfadeMs ?? fallbackCrossfade, mode);
   const gapMs = Math.max(0, options.gapMs ?? 0);
 
   const segments: Segment[] = [];
@@ -168,7 +196,7 @@ export function planQueue(clips: QueueClip[], options: QueuePlanOptions = {}): Q
   }
 
   const totalMs = segments.length > 0 ? segments[segments.length - 1].endMs : 0;
-  return { segments, totalMs, speed, crossfadeMs, gapMs };
+  return { segments, totalMs, speed, crossfadeMs, gapMs, mode };
 }
 
 /**

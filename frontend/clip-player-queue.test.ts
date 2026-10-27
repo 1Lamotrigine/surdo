@@ -187,4 +187,18 @@ describe("ClipPlayer — очередь клипов", () => {
     expect(player.clipCount).toBe(0);
     expect(player.queue).toBeNull();
   });
+
+  it("в режиме dactyl использует укороченный переход", async () => {
+    const fake = makeFakeVrm();
+    const player = new ClipPlayer(fake.vrm, {
+      mode: "dactyl",
+      crossfadeMs: 80,
+      smoothing: false,
+    });
+    player.loadQueue([await makeClip(15), await makeClip(15), await makeClip(15)]);
+    // 80 мс при 30 fps и 1x → ~2 кадра (а не 6, как у обычной фразы).
+    expect(player.crossfadeFrameCount).toBeLessThanOrEqual(3);
+    expect(player.queue?.mode).toBe("dactyl");
+    expect(player.queue?.crossfadeMs).toBe(80);
+  });
 });

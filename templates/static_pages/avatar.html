@@ -11,8 +11,8 @@
       <p class="eyebrow">Этап C1 · Three.js + three-vrm</p>
       <h1>Аватар в браузере</h1>
       <p class="lead">
-        Сцена WebGL, свет, камера, загрузка VRM, декодер клипов, ретаргет и
-        очередь с блендингом. Дактиль (C5) и субтитры (C6) появятся дальше.
+        Сцена WebGL, свет, камера, загрузка VRM, декодер клипов, ретаргет,
+        очередь с блендингом и дактиль по буквам. Субтитры (C6) появятся дальше.
       </p>
     </header>
 
@@ -61,6 +61,24 @@
       <p class="avatar-clip-status" data-clip-status aria-live="polite">
         Клип не загружен.
       </p>
+    </section>
+
+    <section class="avatar-dactyl" aria-labelledby="dactyl-title">
+      <h2 id="dactyl-title">Дактиль (C5)</h2>
+      <p>
+        Введите слово (кириллица, цифры, пробел между словами) — аватар покажет
+        его по буквам с укороченным блендингом. Клипов букв в репозитории нет
+        (их пишет инструмент редактора, блок D), поэтому на странице собираются
+        синтетические заготовки: форма пальцев зависит от буквы, пробел — пауза
+        в нейтральной позе.
+      </p>
+      <div class="avatar-actions">
+        <label class="avatar-field avatar-field-inline">
+          <span>Слово для дактиля</span>
+          <input type="text" value="Иванов" data-avatar-dactyl-text>
+        </label>
+        <button class="button" type="button" data-avatar-dactyl>Показать по буквам</button>
+      </div>
     </section>
 
     {% if not model_url %}
