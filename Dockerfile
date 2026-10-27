@@ -18,7 +18,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system app && adduser --system --ingroup app app
+# CTranslate2 (движок faster-whisper) использует системный libgomp.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system app \
+    && adduser --system --ingroup app app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

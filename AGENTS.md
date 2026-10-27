@@ -25,6 +25,7 @@
 | htmx | 2.0.11 |
 | segno (QR, SVG) | 1.6.6 |
 | pymorphy3 | 2.0.6 |
+| faster-whisper | 1.2.1 |
 | pytest / pytest-django / ruff | 9.1.1 / 4.14.0 / 0.17.3 |
 | daphne (только тесты Channels) | 4.2.3 |
 
@@ -142,6 +143,15 @@ app/
   Ollama, `LLM_API_URL`/`LLM_TIMEOUT` в настройках. `create_utterance` без
   `glosses` остаётся путём E1; F4 передаёт готовые глоссы, `gloss_ms` и
   `degraded`. Очередь по умолчанию использует `process_text_job_async`.
+- Распознавание речи (F5): `services/asr.py` — контракт
+  `transcribe(audio, lang) -> AsrResult(text, duration_ms)` и провайдер
+  `FasterWhisperProvider` (ленивая загрузка модели один раз под замком,
+  `WHISPER_MODEL`, `WHISPER_DEVICE`; CPU → int8, CUDA → float16).
+  `AsrService` держит отдельный `ThreadPoolExecutor` и
+  `BoundedSemaphore(ASR_MAX_CONCURRENCY)`, даёт sync `transcribe` и async
+  `transcribe_async`; аудио передаётся байтами в памяти и не сохраняется.
+  Тесты используют валидный короткий WAV и подменённую модель, без скачивания
+  весов. Приём аудио и связка с очередью — F6.
 - Живые фразы (E3): `pipeline/events.py` рассылает в группу `room_<id>`
   `asr_text` (сразу распознанный текст) и `utterance` (глоссы E1 + клипы
   проверенных жестов/чисел/дактиля в порядке показа). Фоновый поток очереди

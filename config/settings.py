@@ -124,6 +124,12 @@ ROOM_PING_TIMEOUT = int(os.environ.get("ROOM_PING_TIMEOUT", "60"))
 ASR_MAX_CONCURRENCY = max(1, int(os.environ.get("ASR_MAX_CONCURRENCY", os.cpu_count() or 1)))
 ROOM_QUEUE_MAX = max(1, int(os.environ.get("ROOM_QUEUE_MAX", "5")))
 
+# Распознавание речи (F5): имя модели faster-whisper или путь к локальной
+# модели и устройство. На CPU по умолчанию используется int8, на CUDA —
+# float16; модель загружается один раз на процесс при первом запросе.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small").strip() or "small"
+WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu").strip().lower() or "cpu"
+
 # LLM-глоссы (F1/F4): провайдер, модель и ключ. Пустые значения означают, что
 # LLM не настроена: конвейер перейдёт в упрощённый режим F2. Таймаут — жёсткий
 # предел ожидания глосс; при его превышении фраза показывается только

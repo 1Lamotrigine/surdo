@@ -4,21 +4,23 @@
 
 ## Текущий этап
 
-**F4 — подключение LLM-глосс к конвейеру: готов.**
+**F5 — распознавание речи faster-whisper: готов.**
 
-Предыдущие этапы: **F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
+Предыдущие этапы: **F4 — LLM в конвейере, F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
 
 ## Что готово
 
 - Django-проект (`config`) и приложения `accounts`, `rooms`, `dictionary`, `pipeline`.
-- Пакет `services` (без Django-моделей): `services.clips` — хранилище клипов.
+- Пакет `services` (без Django-моделей): `services.clips` — хранилище клипов,
+  `services.asr` — распознавание речи за интерфейсом провайдера.
 - Настройки из переменных окружения: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`,
   `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `MEDIA_ROOT`, `LOG_LEVEL`,
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
   `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`, `AVATAR_MODEL_URL`,
   `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
   `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`,
-  `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_URL`, `LLM_TIMEOUT`.
+  `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_URL`, `LLM_TIMEOUT`,
+  `WHISPER_MODEL`, `WHISPER_DEVICE`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -529,6 +531,15 @@
   пустые `tokens` (только субтитры) и `degraded=True`. Очередь по умолчанию
   использует async-обработчик, а сохранение фразы принимает готовые глоссы,
   `gloss_ms` и `degraded`; `create_utterance` без них остаётся путём E1.
+- **Распознавание речи (F5):** `services/asr.py` реализует контракт ТЗ 7.1
+  `transcribe(audio, lang) -> AsrResult(text, duration_ms)`. Провайдер
+  `FasterWhisperProvider` импортирует `faster-whisper` лениво и создаёт
+  `WhisperModel` один раз под замком (`WHISPER_MODEL`, `WHISPER_DEVICE`; на CPU
+  int8, на CUDA float16). `AsrService` держит отдельный `ThreadPoolExecutor` и
+  `BoundedSemaphore(ASR_MAX_CONCURRENCY)`, принимает WAV/Opus байтами в памяти,
+  даёт sync `transcribe` и async `transcribe_async`; аудио никуда не
+  сохраняется. Модульные `services.asr.transcribe`/`transcribe_async` работают
+  через общий сервис, а `set_asr_provider` позволяет подменить распознаватель.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -592,6 +603,7 @@
 | Запасной режим глосс (F2) | `services/gloss.py:fallback_glosses`, `services/morphology.py` (`word_forms`, `lemmatize_word`, `is_function_word`) |
 | Сжатие фразы (F3) | `services/gloss.py:compress`, `compress_locally`, `build_compress_prompt`, `compress_response_schema` |
 | Конвейер LLM-глосс (F4) | `pipeline/gloss_engine.py` (`compute_glosses`, `compute_glosses_async`, `GlossOutcome`, `verified_gloss_dictionary`), `services/llm.py` (`HttpLLMProvider`, `provider_from_settings`), `pipeline/queue.py:process_text_job_async` |
+| Распознавание речи (F5) | `services/asr.py` (`transcribe`, `transcribe_async`, `AsrResult`, `AsrProvider`, `FasterWhisperProvider`, `AsrService`) |
 
 ## Клиент: режимы
 
@@ -785,6 +797,11 @@
   LLM-глоссы, ставит `fingerspell` в очередь незнакомых слов, без провайдера
   уходит в F2 с `degraded`, а зависший провайдер не задерживает `Future`:
   фраза сохраняется только субтитрами.
+- `services/tests/test_asr.py` (F5) — валидный короткий WAV 16 кГц mono,
+  текст из сегментов и длительность аудио, однократная загрузка модели (в том
+  числе при параллельных первых вызовах), CPU int8/CUDA float16, отказ на
+  пустое аудио/неизвестный язык, обёртка ошибок модели, лимит параллелизма
+  пула и семафора, async-вызов без блокировки event loop, подмена провайдера.
 - `dictionary/tests/test_statuses.py` — чистые правила переходов: разрешённые и
   запрещённые пары, требуемые роли, `allowed_targets`, совпадение значений
   `StrEnum` и `TextChoices`.
@@ -1787,11 +1804,58 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
   сохранило E2-тесты и позволило F4 не запускать вложенный `asyncio.run` на
   каждом задании (он ждал бы executor при таймауте).
 
+## Проверка F5
+
+```bash
+.venv/bin/python -m pytest services/tests/test_asr.py -q
+```
+
+Тесты не скачивают веса и не требуют GPU: WAV собирается стандартным `wave`,
+а `faster_whisper.WhisperModel` подменяется фабрикой. Проверяются ленивая
+загрузка модели ровно один раз, лимит параллелизма и то, что event loop
+продолжает работать во время `transcribe_async`. Полный прогон — 567 pytest.
+
+Для ручной проверки нужен установленный `faster-whisper` и доступ к весам
+(`WHISPER_MODEL=small`, `WHISPER_DEVICE=cpu`); модель скачается при первой
+фразе и останется в кэше Hugging Face. Аудио в тестах и в сервисе не
+сохраняется на диск.
+
+## Решения F5
+
+- `services/asr.py` следует контракту ТЗ 7.1: вход — байты одной фразы,
+  выход — `AsrResult(text, duration_ms)`. `duration_ms` — длительность
+  исходного аудио из `TranscriptionInfo`, а не время работы модели: метрику
+  `asr_ms` измеряет конвейер F6, как и `gloss_ms` в F4.
+- Модель загружается лениво и только один раз, под отдельным `threading.Lock`.
+  Импорт `faster_whisper` тоже ленивый: тесты и команды, которым ASR не нужен,
+  не платят за `ctranslate2` и не требуют весов. Если пакета нет, ошибка
+  `AsrUnavailableError` объясняет, что установить.
+- `AsrService` держит собственный `ThreadPoolExecutor` и
+  `BoundedSemaphore(ASR_MAX_CONCURRENCY)`: ограничение распознавания не
+  смешивается с другими `asyncio.to_thread`, а лишние фразы ждут, а не
+  плодят потоки. Sync `transcribe` нужен тестам и скриптам, async
+  `transcribe_async` — конвейеру; ни один путь не блокирует event loop.
+- Язык комнаты `ru`/`kk` передаётся Whisper как есть; `rsl`/`ksl` сводятся к
+  языку речи. Другие коды отклоняются: словарь проекта ограничен русским и
+  казахским, а случайный `en` дал бы неожиданные субтитры.
+- Вычисления: CPU → `int8`, CUDA → `float16`, `auto` → `default`. Это
+  ориентир ТЗ 5.2 для `small` на 4 vCPU; точный выбор остаётся за
+  `WHISPER_DEVICE`, а `WHISPER_MODEL` может быть именем или путём к локальной
+  модели.
+- Ошибки модели не глотаются: провайдер оборачивает их в `AsrError`, пул — в
+  `AsrError`, таймаут — в `AsrTimeoutError`. Решение «показать субтитры и
+  `degraded`» принимает F6, где известны комната и событие `asr_text`.
+- `faster-whisper==1.2.1` — новая зависимость этапа (ТЗ 6); в Dockerfile
+  добавлен `libgomp1`, нужный CTranslate2. Веса моделей в образ не входят:
+  они скачиваются при первом использовании и кэшируются Hugging Face.
+- Тест на WAV намеренно использует подменённую модель: реальный `small`
+  требует сотни мегабайт и сеть, что сделало бы `make check` невоспроизводимым.
+  Контракт провайдера при этом проверяется на настоящих байтах WAV.
+
 ## Дальше
 
-**F4 готов.** Следующий — F5: `services.asr` с faster-whisper (модель грузится
-один раз), пул потоков и семафор, затем F6 — приём аудио фразы. После блока
-голоса останутся F7 (микрофон/VAD) и F8 (пороги отставания, ускорение и
-`compress`). Для ручной проверки F4 нужен реальный ключ/модель LLM в `.env` и
-`LLM_PROVIDER=openai|ollama`; без них конвейер работает в режиме F2.
+**F5 готов.** Следующий — F6: `POST /api/rooms/<code>/phrase/` с multipart
+аудио, ответ 202, фоновая обработка через `services.asr`, `asr_ms` и событие
+`asr_text`; аудио хранится только в памяти. После него останутся F7
+(микрофон/VAD в браузере) и F8 (пороги отставания, ускорение и `compress`).
 
