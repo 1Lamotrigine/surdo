@@ -1587,3 +1587,72 @@ button:focus-visible {
   margin: 0;
   padding-left: 1.25rem;
 }
+
+
+/* D2: запись клипа, обрезка и скачивание */
+.record-page [hidden] {
+  display: none !important;
+}
+
+.record-timer {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+
+.record-clip-status,
+.record-build-status {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.record-clip-status[data-state="running"],
+.record-build-status[data-state="running"] {
+  color: #166534;
+}
+
+.record-clip-status[data-state="warning"],
+.record-build-status[data-state="warning"] {
+  color: #92400e;
+}
+
+.record-clip-status[data-state="error"],
+.record-build-status[data-state="error"] {
+  color: #991b1b;
+}
+
+.record-trim {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.record-trim h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.record-trim p {
+  color: var(--muted);
+}
+
+.record-trim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.record-trim .avatar-field output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.record-trim .button {
+  margin-top: 0.75rem;
+}

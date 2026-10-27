@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**D1 — камера и MediaPipe Holistic: готов.**
+**D2 — запись клипа: готов.**
 
 ## Что готово
 
@@ -14,7 +14,8 @@
   `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `MEDIA_ROOT`, `LOG_LEVEL`,
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
   `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`, `AVATAR_MODEL_URL`,
-  `MEDIAPIPE_HOLISTIC_MODEL_URL`.
+  `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
+  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -364,8 +365,19 @@
 - **Инструмент записи (D1):** страница `GET /dictionary/record/` (только роли
   словаря) включает камеру по кнопке, показывает видео и скелет поверх него,
   счётчик кадров и найденные кисти. Видео не уходит на сервер. WASM копируется
-  Vite-плагином, модель задаётся `MEDIAPIPE_HOLISTIC_MODEL_URL`; запись клипа —
-  этап D2.
+  Vite-плагином, модель задаётся `MEDIAPIPE_HOLISTIC_MODEL_URL`.
+- **Упаковка клипа (D2):** `frontend/clip-encode.ts` — кодирование
+  `Float32 → Float16 little-endian → gzip → base64`, payload версии 1 с layout
+  `{pose:33, hand_l:21, hand_r:21, face:468}` и файл `.json.gz`. Размер данных
+  проверяется как `frames × points × 3`; упакованный файл читается декодером C2
+  (`frontend/clip.ts`) без потери структуры.
+- **Запись и обрезка (D2):** `frontend/clip-record.ts` — автоматическая обрезка
+  начала и конца по позе/кистям, ручной диапазон, пересэмплирование на 30 FPS
+  (ближайший исходный кадр), добор пропавших кистей/лица (предыдущий кадр или
+  нейтральная заготовка), One Euro и `encodeRecordedClip`. На странице записи —
+  кнопки старт/стоп, таймер, автолимит по `CLIP_MAX_FRAMES`, ползунки обрезки,
+  сборка и контрольная распаковка, скачивание `.json.gz`. Лимиты кадров и
+  размера передаются из настроек Django.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -399,7 +411,7 @@
 | Очередь на проверке | `GET /dictionary/review/` → `dictionary.views.review_queue` |
 | Карточка жеста (решение) | `GET/POST /dictionary/review/<id>/` → `dictionary.views.review_sign` |
 | Очередь нераспознанных слов | `GET /dictionary/queue/` → `dictionary.views.unknown_queue` |
-| Запись жеста с камеры (D1) | `GET /dictionary/record/` → `dictionary.views.record_gesture` |
+| Запись жеста с камеры (D1–D2) | `GET /dictionary/record/` → `dictionary.views.record_gesture` |
 | Действие со словом очереди | `POST /dictionary/queue/<id>/action/` → `dictionary.views.unknown_word_action` |
 | Закрыть комнату | `POST /rooms/<code>/close/` → `rooms.views.room_close` |
 | Сменить ID комнаты | `POST /rooms/<code>/rotate-code/` → `rooms.views.room_rotate_code` |
@@ -420,6 +432,7 @@
 | JS настроек студента (C7) | `frontend/student-settings.ts` (`loadStudentSettings`, `saveStudentSettings`, `StudentSettingsView`) |
 | JS уведомлений и Wake Lock (C8) | `frontend/notifications.ts` (`notificationKindFor`, `vibrate`, `ScreenWakeLock`, `ScreenNotifier`) |
 | JS MediaPipe и скелета (D1) | `frontend/holistic.ts` (`HolisticDetector`, `normalizeHolisticResult`), `frontend/skeleton.ts`, `frontend/record-page.ts` |
+| JS записи и упаковки клипа (D2) | `frontend/clip-record.ts` (`encodeRecordedClip`, `autoTrimRange`, `resampleCapturedFrames`), `frontend/clip-encode.ts` (`encodeClipPayload`, `packClipFile`) |
 
 ## Клиент: режимы
 
@@ -441,9 +454,15 @@
   подсказка при пустой модели; поля настроек студента (C7).
 - `rooms/tests/test_join.py` — вход студента и страница комнаты; разметка
   уведомлений и Wake Lock (C8).
-- `dictionary/tests/test_record_page.py` — страница D1: вход, роли словаря,
-  разметка камеры/холста/кнопок, передача модели и пути WASM, ссылка из очереди
-  нераспознанных слов.
+- `dictionary/tests/test_record_page.py` — страница D1–D2: вход, роли словаря,
+  разметка камеры/холста/кнопок, передача модели и пути WASM, элементы записи и
+  обрезки, лимиты клипа из настроек, ссылка из очереди нераспознанных слов.
+- `frontend/clip-record.test.ts` (vitest) — конвейер D2: автообрезка, границы
+  ручного диапазона, пересэмплирование на 30 FPS, добор частей скелета,
+  сглаживание, лимит кадров, упаковка → распаковка C2, ретаргет без NaN.
+- `frontend/clip-encode.test.ts` (vitest) — Float16 (известные биты, ноль,
+  субнормальное, бесконечность), base64, gzip, payload версии 1, проверка
+  размера данных и чтение `.json.gz` декодером C2.
 - `frontend/holistic.test.ts` (vitest) — разбор ответа MediaPipe: вложенные и
   плоские наборы, мусор, пустой кадр, определение кистей.
 - `frontend/skeleton.test.ts` (vitest) — геометрия предпросмотра: `object-fit:
@@ -975,12 +994,55 @@ WhiteNoise из `static/dist/mediapipe`.
 - Страница доступна только редактору, эксперту и администратору — как остальные
   инструменты словаря. Роль преподавателя получает 403.
 
+## Проверка D2
+
+```bash
+make check          # ruff + tsc + vitest (241) + pytest (351) + vite build — зелёный
+```
+
+Автотесты покрывают упаковку и обратную распаковку формата v1
+(`frontend/clip-encode.test.ts`), весь конвейер записи — автообрезку,
+пересэмплирование, добор кистей/лица, One Euro, лимиты и ретаргет
+(`frontend/clip-record.test.ts`), а также разметку и лимиты страницы
+(`dictionary/tests/test_record_page.py`). Ручная проверка: войти редактором,
+открыть `/dictionary/queue/` и нажать «Записать жест с камеры», разрешить
+доступ. Нажать «Начать запись», показать жест, остановить. Края должны
+обрезаться, ползунки — менять длительность, а строка сборки — подтвердить
+размер, версию формата и совпадение распаковки. Скачанный `.json.gz` можно
+проверить командой `gzip -dc zapis-*.json.gz | head -c 200`. Реальная камера и
+MediaPipe проверяются в браузере: vitest работает без DOM.
+
+## Решения D2
+
+- Кодировщик вынесен в `frontend/clip-encode.ts`, а конвейер записи — в
+  `frontend/clip-record.ts`; страница остаётся тонким слоем. Новых зависимостей
+  нет, формат и `CLIP_VERSION` общие с C2.
+- Кадры с камеры пишутся не чаще целевого FPS, а на финале пересэмплируются на
+  равномерные 30 FPS по ближайшей метке времени. Так клип не зависит от того,
+  с какой частотой браузер успевал вызывать MediaPipe.
+- Автообрезка ищет первую и последнюю позу/кисть; лицо само по себе не считается
+  жестом. Ручные ползунки ограничены минимумом в два кадра.
+- Пропавшие кисти и лицо сначала берутся из предыдущего кадра, затем строится
+  нейтральная заготовка у запястья/центра позы. Поэтому каждый кадр всегда
+  содержит полный layout из 543 точек и ретаргет C3 не получает `NaN`.
+- One Euro применяется после пересэмплирования, отдельным фильтром на каждую
+  часть скелета, поэтому сглаживание не зависит от неровного потока кадров.
+- После сборки страница сразу распаковывает собственный `.json.gz` тем же
+  декодером C2 и сверяет число кадров/точек. Это и есть приёмочная проверка
+  «упаковка и распаковка дают тот же клип».
+- Лимиты (`CLIP_DEFAULT_FPS`, `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`) приходят
+  из настроек в `data-*` страницы. Запись автоматически останавливается на
+  `CLIP_MAX_FRAMES`, а превышение размера файла показывается предупреждением —
+  окончательно его проверит API D3.
+- На D2 клип только скачивается; предпросмотр на аватаре, форма метаданных и
+  сохранение черновика через API — следующий этап D3.
+
 ## Дальше
 
-**D1 готов.** Следующий — D2: запись клипа (старт/стоп, обрезка начала и конца,
-One Euro, упаковка в формат клипа) и проверка обратимости упаковки. Читать:
-`docs/spec/clip-format.md`, `docs/spec/requirements.md` (3.5), текущие
-`frontend/clip.ts`, `frontend/one-euro.ts`.
+**D2 готов.** Следующий — D3: предпросмотр записанного клипа на аватаре, форма
+метаданных и сохранение черновика через `POST /api/signs/`. Читать:
+`docs/spec/clip-format.md`, `docs/spec/api.md`, `docs/spec/requirements.md`
+(3.5), `frontend/clip-player.ts`, `frontend/record-page.ts`.
 
 
 Пополнение очереди из реальных занятий подключается в блоке **E**

@@ -64,6 +64,15 @@ def test_record_page_renders_camera_and_skeleton(client, editor):
     # Показатели распознавания и точка входа клиента.
     assert "data-record-stats" in html
     assert "data-record-hands" in html
+    # D2: запись клипа, обрезка, проверка распаковкой и скачивание.
+    assert "data-record-start-clip" in html
+    assert "data-record-stop-clip" in html
+    assert "data-record-clip-status" in html
+    assert "data-record-trim" in html
+    assert "data-record-trim-start" in html
+    assert "data-record-trim-end" in html
+    assert "data-record-build-status" in html
+    assert "data-record-download" in html
     assert "record-page" in html
 
 
@@ -133,3 +142,17 @@ def test_unknown_queue_links_to_record_tool(client, editor):
 
     assert reverse("dictionary:record") in html
     assert "Записать жест с камеры" in html
+
+
+@override_settings(CLIP_DEFAULT_FPS=25, CLIP_MAX_FRAMES=100, CLIP_MAX_SIZE_BYTES=1234)
+def test_record_page_passes_clip_limits(client, editor):
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"))
+    html = response.content.decode()
+
+    assert 'data-record-fps="25"' in html
+    assert 'data-record-max-frames="100"' in html
+    assert 'data-record-max-bytes="1234"' in html
+    assert "4,0" in html
+    assert "(100 кадров при 25 FPS)" in html

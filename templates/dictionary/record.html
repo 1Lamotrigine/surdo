@@ -7,9 +7,12 @@
   <section class="record-page"
            data-record-page
            data-mediapipe-wasm="{{ mediapipe_wasm_path }}"
-           data-mediapipe-model-url="{{ model_url }}">
+           data-mediapipe-model-url="{{ model_url }}"
+           data-record-fps="{{ fps }}"
+           data-record-max-frames="{{ max_frames }}"
+           data-record-max-bytes="{{ max_bytes }}">
     <header class="record-head">
-      <p class="eyebrow">Редактор словаря · этап D1</p>
+      <p class="eyebrow">Редактор словаря · этап D2</p>
       <h1>Запись жеста с камеры</h1>
       <p class="lead">
         Включите камеру и встаньте так, чтобы в кадр попали лицо, корпус и обе
@@ -31,9 +34,20 @@
     <div class="record-actions">
       <button class="button" type="button" data-record-start>Включить камеру</button>
       <button class="button button-secondary" type="button" data-record-stop disabled>
-        Остановить
+        Остановить камеру
+      </button>
+      <button class="button" type="button" data-record-start-clip disabled>
+        Начать запись
+      </button>
+      <button class="button button-danger" type="button" data-record-stop-clip disabled>
+        Остановить запись
       </button>
     </div>
+
+    <p class="record-timer" data-record-timer aria-live="off">0.00 с / {{ max_duration_seconds }} с</p>
+    <p class="record-clip-status" data-record-clip-status data-state="idle" aria-live="polite">
+      Запись не начата.
+    </p>
 
     <dl class="record-stats" aria-label="Показатели распознавания">
       <div>
@@ -46,11 +60,37 @@
       </div>
     </dl>
 
+    <section class="record-trim" data-record-trim hidden aria-labelledby="record-trim-title">
+      <h2 id="record-trim-title">Обрезка и файл клипа (D2)</h2>
+      <p>
+        Края записи обрезаны автоматически по появлению позы и кистей. Ползунками
+        можно оставить только нужный фрагмент: клип пересобирается сразу,
+        сглаживается One Euro и проверяется обратной распаковкой.
+      </p>
+      <div class="record-trim-grid">
+        <label class="avatar-field">
+          <span>Начало: <output data-record-trim-start-value>0.00 с</output></span>
+          <input id="record-trim-start" type="range" min="0" max="0" step="1" value="0"
+                 data-record-trim-start>
+        </label>
+        <label class="avatar-field">
+          <span>Конец: <output data-record-trim-end-value>0.00 с</output></span>
+          <input id="record-trim-end" type="range" min="0" max="0" step="1" value="0"
+                 data-record-trim-end>
+        </label>
+      </div>
+      <p class="record-build-status" data-record-build-status data-state="idle" aria-live="polite">
+        Клип ещё не собран.
+      </p>
+      <a class="button" data-record-download hidden download>Скачать клип (.json.gz)</a>
+    </section>
+
     <aside class="notice notice-warning">
       <p>
         Камера доступна только на <code>localhost</code> или по HTTPS. При первом
         запуске браузер скачает WASM MediaPipe (~13 МБ) и модель Holistic; дальше
-        они берутся из кэша. Запись и обрезка клипа появятся на этапе D2.
+        они берутся из кэша. Максимальная длина записи — {{ max_duration_seconds }}
+        с ({{ max_frames }} кадров при {{ fps }} FPS), файл — до {{ max_bytes|filesizeformat }}.
       </p>
       {% if not model_url %}
         <p>
@@ -66,6 +106,7 @@
         <li>Поднимите руку и пошевелите пальцами — линия кисти и фаланги повторяют движение без заметной задержки.</li>
         <li>Наклоните голову — контур лица и брови следуют за мимикой.</li>
         <li>Выйдите из кадра — предпросмотр остаётся, а строка показателей пишет, что человека нет.</li>
+        <li>Запишите жест, подвиньте ползунки обрезки и скачайте файл: строка сборки должна подтвердить, что распаковка дала тот же клип.</li>
       </ul>
     </aside>
   </section>

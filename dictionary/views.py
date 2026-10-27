@@ -191,5 +191,11 @@ def record_gesture(request: HttpRequest):
         {
             "model_url": settings.MEDIAPIPE_HOLISTIC_MODEL_URL,
             "mediapipe_wasm_path": _mediapipe_wasm_path(),
+            "fps": settings.CLIP_DEFAULT_FPS,
+            "max_frames": settings.CLIP_MAX_FRAMES,
+            "max_bytes": settings.CLIP_MAX_SIZE_BYTES,
+            "max_duration_seconds": round(
+                settings.CLIP_MAX_FRAMES / settings.CLIP_DEFAULT_FPS, 1
+            ),
         },
     )

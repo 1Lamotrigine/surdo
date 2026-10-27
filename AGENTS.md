@@ -95,12 +95,17 @@ app/
   `/rooms/<code>/close/`, `/rooms/<code>/rotate-code/`,
   `/rooms/<code>/participants/<id>/remove/`. Смена ID не меняет `room.id` —
   группа та же, старый код перестаёт находиться.
-- Инструмент записи жеста (D1): страница `/dictionary/record/` (`record_gesture`),
-  клиент `frontend/holistic.ts` + `frontend/skeleton.ts` + `frontend/record-page.ts`.
-  MediaPipe Tasks Vision (`@mediapipe/tasks-vision`) грузит WASM из
-  `static/dist/mediapipe` (копирует плагин `vite.config.ts`) и модель из
-  `MEDIAPIPE_HOLISTIC_MODEL_URL`; видео не отправляется на сервер. Запись клипа —
-  D2, отправка в API — D3, запись из очереди — D4.
+- Инструмент записи жеста (D1–D2): страница `/dictionary/record/`
+  (`record_gesture`), клиент `frontend/holistic.ts` + `frontend/skeleton.ts` +
+  `frontend/record-page.ts`. MediaPipe Tasks Vision (`@mediapipe/tasks-vision`)
+  грузит WASM из `static/dist/mediapipe` (копирует плагин `vite.config.ts`) и
+  модель из `MEDIAPIPE_HOLISTIC_MODEL_URL`; видео не отправляется на сервер.
+  Запись (D2): `frontend/clip-record.ts` — автообрезка краёв, пересэмплирование
+  на 30 FPS, добор кистей/лица, One Euro; `frontend/clip-encode.ts` — Float16 →
+  gzip → base64 и `.json.gz` формата C2. После сборки страница сразу распаковывает
+  файл декодером `frontend/clip.ts` и сверяет кадры/точки. Лимиты — из
+  `CLIP_DEFAULT_FPS`/`CLIP_MAX_FRAMES`/`CLIP_MAX_SIZE_BYTES`. Отправка в API — D3,
+  запись из очереди — D4.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при
