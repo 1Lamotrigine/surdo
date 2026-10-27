@@ -1,8 +1,10 @@
 import htmx from "htmx.org";
 
+import { setupPwa } from "./pwa";
+
 /**
- * Точка входа клиента. На этапе A3 здесь только проверка сборки и HTMX;
- * модули аватара, записи жестов и PWA появятся позже.
+ * Точка входа клиента: HTMX, подтверждения и регистрация PWA (G1).
+ * Модули аватара и записи жестов подключаются только на своих страницах.
  */
 function markClientReady(): void {
   const status = document.querySelector<HTMLElement>("[data-client-status]");
@@ -35,6 +37,8 @@ function setupConfirmButtons(): void {
 function init(): void {
   markClientReady();
   setupConfirmButtons();
+  // PWA (G1): манифест и service worker. Регистрация не критична для работы.
+  setupPwa();
 }
 
 if (document.readyState === "loading") {

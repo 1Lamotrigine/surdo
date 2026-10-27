@@ -76,6 +76,19 @@ docker compose exec web python manage.py seed_admin
 `CHAT_RATE_LIMIT_WINDOW` секунд). Панель преподавателя с чатом и участниками —
 `/rooms/<ID>/live/`.
 
+## PWA и установка на телефон
+
+Сайт работает как PWA: он отдаёт веб-манифест с корня (`/manifest.webmanifest`),
+иконки и service worker (`/sw.js`). Service worker кэширует статику клиента и
+клипы жестов, поэтому при повторном заходе жесты не скачиваются заново; новая
+версия словаря или новая сборка клиента сбрасывает устаревший кэш. Приложение
+устанавливается на домашний экран Android (Chrome) и iPhone (Safari, «На экран
+Домой»), при этом сайт полностью работает и во вкладке без установки.
+
+Регистрация service worker идёт только по HTTPS или на `localhost` — браузер
+больше нигде его не отдаёт. Иконки PWA пересобираются скриптом
+`python scripts/make_pwa_icons.py` (без внешних зависимостей).
+
 ## Клиент в разработке
 
 По умолчанию `DJANGO_VITE_DEV_MODE=False`: Django отдаёт собранные файлы из
@@ -102,7 +115,7 @@ TypeScript, `make client-test` гоняет тесты клиента (vitest).
 | `services/` | ASR, глоссы, сжатие (pure Python) |
 | `frontend/` | TypeScript-модули, точка входа `main.ts` |
 | `vite.config.ts` | сборка в `static/dist` |
-| `templates/`, `static/` | шаблоны, статика и HTMX |
+| `templates/`, `static/` | шаблоны, статика, иконки PWA и HTMX |
 | `docs/spec/` | выжимки из ТЗ |
 | `docs/STATE.md` | текущее состояние проекта |
 

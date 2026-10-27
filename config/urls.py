@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import include, path
 
-from config import views
+from config import pwa, views
 from dictionary.api import create_sign_api, dictionary_api, review_sign_api
 from dictionary.views import clip_file
 from pipeline.api import phrase_api, text_api
@@ -12,6 +12,10 @@ urlpatterns = [
     path("health/", views.health, name="health"),
     path("partials/htmx-demo/", views.htmx_demo, name="htmx-demo"),
     path("avatar/", views.avatar_test, name="avatar-test"),
+    # PWA отдаётся с корня сайта: только так service worker получает область
+    # видимости `/` и управляет страницами комнаты (G1, FR-23/FR-24).
+    path(pwa.MANIFEST_FILENAME, pwa.manifest, name="pwa-manifest"),
+    path(pwa.SW_FILENAME, pwa.service_worker, name="pwa-service-worker"),
     path("accounts/", include("accounts.urls")),
     path("rooms/", include("rooms.urls")),
     path("dictionary/", include("dictionary.urls")),
