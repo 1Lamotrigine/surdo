@@ -24,6 +24,9 @@ docker compose exec web python manage.py migrate
 
 Стартовая страница: <http://localhost/> (через Caddy), health: <http://localhost/health/>.
 
+На этапе A2 доступен тестовый WebSocket-эхо `ws://localhost/ws/echo/<group>/`
+(только при `DEBUG=True`). Два клиента одной группы получают общие сообщения.
+
 ## Структура
 
 | Путь | Назначение |
