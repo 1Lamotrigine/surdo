@@ -95,7 +95,7 @@ app/
   `/rooms/<code>/close/`, `/rooms/<code>/rotate-code/`,
   `/rooms/<code>/participants/<id>/remove/`. Смена ID не меняет `room.id` —
   группа та же, старый код перестаёт находиться.
-- Инструмент записи жеста (D1–D3): страница `/dictionary/record/`
+- Инструмент записи жеста (D1–D4): страница `/dictionary/record/`
   (`record_gesture`), клиент `frontend/holistic.ts` + `frontend/skeleton.ts` +
   `frontend/record-page.ts`. MediaPipe Tasks Vision (`@mediapipe/tasks-vision`)
   грузит WASM из `static/dist/mediapipe` (копирует плагин `vite.config.ts`) и
@@ -108,7 +108,11 @@ app/
   Предпросмотр (D3): `Avatar` + `ClipPlayer` загружаются лениво после сборки
   клипа, `AVATAR_MODEL_URL` необязателен; `frontend/sign-draft.ts` валидирует
   глоссу/язык/описание и отправляет multipart в `POST /api/signs/` с CSRF,
-  жест создаётся черновиком и виден в Django Admin. Запись из очереди — D4.
+  жест создаётся черновиком и виден в Django Admin. Очередь (D4): ссылка
+  `/dictionary/record/?word=<id>` подставляет лемму/язык; API принимает
+  `unknown_word` и в одной транзакции создаёт жест и переводит слово
+  `queued → recorded`. Слово должно быть взято в работу; `new` и `recorded`
+  по прямой ссылке возвращают в очередь.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при

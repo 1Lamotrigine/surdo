@@ -7,6 +7,11 @@ from django.test import override_settings
 from django.urls import reverse
 
 from accounts.models import Role
+from dictionary.models import UnknownWordStatus
+from dictionary.services import (
+    queue_unknown_word,
+    record_unknown_word,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -134,6 +139,55 @@ def test_record_page_without_avatar_model_still_allows_save(client, editor):
     assert 'data-avatar-model-url=""' in html
     assert "Модель аватара не задана" in html
     assert "data-sign-save" in html
+
+
+def test_record_page_prefills_queued_word(client, editor):
+    word = record_unknown_word("ИВАНОВ", lang="rsl")
+    queue_unknown_word(word)
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"), {"word": word.pk})
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert f'data-record-word-id="{word.pk}"' in html
+    assert 'value="ИВАНОВ"' in html
+    assert "Запись для слова" in html
+    assert 'data-sign-queue' in html
+    assert '<option value="rsl" selected>' in html
+    assert "После успешного сохранения черновика слово" in html
+
+
+def test_record_page_redirects_new_word_to_queue(client, editor):
+    word = record_unknown_word("ИВАНОВ")
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"), {"word": word.pk})
+
+    assert response.status_code == 302
+    assert response.url == reverse("dictionary:unknown-queue")
+    assert word.status == UnknownWordStatus.NEW
+
+
+def test_record_page_redirects_recorded_word_to_queue(client, editor):
+    word = record_unknown_word("ИВАНОВ")
+    queue_unknown_word(word)
+    word.status = UnknownWordStatus.RECORDED
+    word.save(update_fields=("status",))
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"), {"word": word.pk})
+
+    assert response.status_code == 302
+    assert response.url == reverse("dictionary:unknown-queue")
+
+
+def test_record_page_rejects_unknown_queue_word(client, editor):
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"), {"word": 9999})
+
+    assert response.status_code == 404
 
 
 def test_record_page_uses_built_wasm(client, editor):

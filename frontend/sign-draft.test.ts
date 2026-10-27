@@ -75,6 +75,7 @@ describe("submitSignDraft", () => {
       draft: { gloss: "УЧЕБНИК", lang: "rsl", description: "школьный" },
       file,
       filename: "clip.json.gz",
+      unknownWordId: 42,
       fetchImpl,
     });
 
@@ -86,9 +87,34 @@ describe("submitSignDraft", () => {
     expect(form.get("gloss")).toBe("УЧЕБНИК");
     expect(form.get("lang")).toBe("rsl");
     expect(form.get("description")).toBe("школьный");
+    expect(form.get("unknown_word")).toBe("42");
+    expect(result.unknown_word).toBeUndefined();
     const uploaded = form.get("clip");
     expect(uploaded).toBeInstanceOf(Blob);
     expect((uploaded as File).name).toBe("clip.json.gz");
+  });
+
+  it("не отправляет unknown_word без слова очереди", async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedInit = init;
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 8, gloss: "ЖЕСТ", lang: "rsl", status: "draft" }),
+      } as Response;
+    }) as typeof fetch;
+
+    await submitSignDraft({
+      url: "/api/signs/",
+      csrfToken: "token",
+      draft: { gloss: "ЖЕСТ", lang: "rsl", description: "" },
+      file: new Blob([]),
+      fetchImpl,
+    });
+
+    const form = capturedInit?.body as FormData;
+    expect(form.has("unknown_word")).toBe(false);
   });
 
   it("передаёт текст ошибки API", async () => {

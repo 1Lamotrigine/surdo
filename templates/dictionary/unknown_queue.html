@@ -8,7 +8,8 @@
     <h1>Очередь нераспознанных слов</h1>
     <p class="lead">
       Слова из реальных занятий, для которых ещё нет жеста. Сверху самое частое —
-      начните с него: возьмите в работу, а после записи клипа пометьте записанным.
+      возьмите слово в работу и запишите жест: после сохранения черновика слово
+      автоматически станет «Записано».
     </p>
 
     <div class="record-actions">
@@ -48,11 +49,9 @@
               <td>{{ word.last_seen_at|date:"d.m.Y H:i" }}</td>
               <td>
                 {% if word.status == "queued" %}
-                  <form method="post" action="{% url 'dictionary:unknown-word-action' word_id=word.pk %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="recorded">
-                    <button class="button" type="submit">Записать жест</button>
-                  </form>
+                  <a class="button" href="{% url 'dictionary:record' %}?word={{ word.pk }}">
+                    Записать жест
+                  </a>
                 {% elif word.status == "new" %}
                   <form method="post" action="{% url 'dictionary:unknown-word-action' word_id=word.pk %}">
                     {% csrf_token %}

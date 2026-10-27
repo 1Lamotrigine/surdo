@@ -290,6 +290,18 @@ def test_queue_page_filters_by_language(client, editor):
     assert "Иванов" not in body
 
 
+def test_queue_page_links_queued_word_to_recording(client, editor):
+    word = record_unknown_word("Иванов")
+    queue_unknown_word(word)
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:unknown-queue"))
+    html = response.content.decode()
+
+    assert f"{reverse('dictionary:record')}?word={word.pk}" in html
+    assert "Записать жест" in html
+
+
 def test_queue_action_takes_word_in_work(client, editor):
     word = record_unknown_word("Иванов")
     client.force_login(editor)

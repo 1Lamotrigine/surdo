@@ -9,7 +9,7 @@ from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 
-from dictionary.models import Language, Sign, SignStatus
+from dictionary.models import Language, Sign, SignStatus, UnknownWord
 from dictionary.permissions import can_manage_dictionary, can_review_signs
 from dictionary.services import (
     SignPermissionError,
@@ -18,6 +18,7 @@ from dictionary.services import (
     dictionary_payload,
     reject_sign,
     sign_payload,
+    unknown_word_payload,
     verify_sign,
 )
 
@@ -50,7 +51,9 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
     """Создать жест редактором: метаданные и файл клипа (ТЗ 7.4).
 
     Принимает ``multipart/form-data`` (поля ``gloss``, ``lang``, ``description``,
-    файл ``clip``) или ``application/json`` (метаданные без клипа).
+    файл ``clip``, необязательный ``unknown_word``) или ``application/json``.
+    Если передан ``unknown_word``, слово очереди должно быть в статусе
+    ``queued`` и после успешного создания жеста становится ``recorded`` (D4).
     """
     if not request.user.is_authenticated:
         return JsonResponse({"detail": "Требуется вход."}, status=401)
@@ -70,11 +73,13 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
         gloss = payload.get("gloss", "")
         lang = payload.get("lang")
         description = payload.get("description", "")
+        source = payload
         clip = None
     else:
         gloss = request.POST.get("gloss", "")
         lang = request.POST.get("lang")
         description = request.POST.get("description", "")
+        source = request.POST
         upload = request.FILES.get("clip")
         clip = None
         if upload is not None:
@@ -85,6 +90,18 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
                 )
             clip = upload.read()
 
+    unknown_word = None
+    raw_unknown_word = source.get("unknown_word")
+    if raw_unknown_word not in (None, ""):
+        try:
+            unknown_word_id = int(raw_unknown_word)
+        except (TypeError, ValueError):
+            return JsonResponse({"detail": "Некорректный id слова очереди."}, status=400)
+        try:
+            unknown_word = UnknownWord.objects.get(pk=unknown_word_id)
+        except UnknownWord.DoesNotExist:
+            return JsonResponse({"detail": "Слово очереди не найдено."}, status=404)
+
     try:
         sign = create_sign(
             recorded_by=request.user,
@@ -92,11 +109,15 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
             lang=lang,
             description=description,
             clip=clip,
+            unknown_word=unknown_word,
         )
     except SignValidationError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 
-    return JsonResponse(sign_payload(sign), status=201)
+    result = sign_payload(sign)
+    if unknown_word is not None:
+        result["unknown_word"] = unknown_word_payload(unknown_word)
+    return JsonResponse(result, status=201)
 
 
 # Допустимые решения эксперта: утвердить или отклонить.

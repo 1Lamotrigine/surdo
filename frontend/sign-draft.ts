@@ -27,11 +27,19 @@ export type SignDraftValidation = {
   valid: boolean;
 };
 
+export type SignApiUnknownWord = {
+  id: number;
+  lemma: string;
+  status: string;
+  [key: string]: unknown;
+};
+
 export type SignApiSign = {
   id: number;
   gloss: string;
   lang: string;
   status: string;
+  unknown_word?: SignApiUnknownWord;
   [key: string]: unknown;
 };
 
@@ -41,6 +49,8 @@ export type SubmitSignDraftOptions = {
   draft: SignDraft;
   /** Содержимое `.json.gz` в виде Blob (обычно создаётся из Uint8Array). */
   file: Blob;
+  /** Слово очереди (D4): после создания жеста станет `recorded`. */
+  unknownWordId?: number | null;
   filename?: string;
   /** Подмена fetch для тестов; в браузере используется глобальный. */
   fetchImpl?: typeof fetch;
@@ -112,6 +122,9 @@ export async function submitSignDraft(
   form.append("gloss", options.draft.gloss);
   form.append("lang", options.draft.lang);
   form.append("description", options.draft.description);
+  if (options.unknownWordId !== undefined && options.unknownWordId !== null) {
+    form.append("unknown_word", String(options.unknownWordId));
+  }
   form.append(
     "clip",
     options.file,

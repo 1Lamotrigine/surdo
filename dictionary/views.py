@@ -9,7 +9,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.templatetags.static import static
 from django.views.decorators.http import condition, require_http_methods
 
-from dictionary.models import Language, Sign, SignClip, SignStatus, UnknownWord
+from dictionary.models import (
+    Language,
+    Sign,
+    SignClip,
+    SignStatus,
+    UnknownWord,
+    UnknownWordStatus,
+)
 from dictionary.permissions import dictionary_required, review_required
 from dictionary.services import (
     SignPermissionError,
@@ -179,12 +186,30 @@ def unknown_word_action(request: HttpRequest, word_id: int):
 
 @dictionary_required
 def record_gesture(request: HttpRequest):
-    """Инструмент записи жеста (D1–D3): камера, клип и сохранение черновика.
+    """Инструмент записи жеста (D1–D4): камера, клип и сохранение черновика.
 
     MediaPipe рисует скелет, D2 собирает клип, D3 даёт посмотреть его на
-    аватаре, заполнить метаданные и отправить в ``POST /api/signs/``. Страница
-    доступна ролям словаря, как и остальные инструменты редактора.
+    аватаре, заполнить метаданные и отправить в ``POST /api/signs/``. D4
+    открывает эту же страницу для слова из очереди: ``?word=<id>``
+    подставляет глоссу и язык, а API после сохранения помечает слово
+    записанным. Страница доступна ролям словаря, как и остальные инструменты
+    редактора.
     """
+    word = None
+    raw_word_id = request.GET.get("word")
+    if raw_word_id:
+        try:
+            word_id = int(raw_word_id)
+        except (TypeError, ValueError) as exc:
+            raise Http404("Слово очереди не найдено") from exc
+        word = get_object_or_404(UnknownWord, pk=word_id)
+        if word.status != UnknownWordStatus.QUEUED:
+            if word.status == UnknownWordStatus.RECORDED:
+                messages.info(request, f"Слово «{word.lemma}» уже записано.")
+            else:
+                messages.warning(request, f"Сначала возьмите слово «{word.lemma}» в работу.")
+            return redirect("dictionary:unknown-queue")
+
     return render(
         request,
         "dictionary/record.html",
@@ -193,6 +218,7 @@ def record_gesture(request: HttpRequest):
             "avatar_model_url": settings.AVATAR_MODEL_URL,
             "mediapipe_wasm_path": _mediapipe_wasm_path(),
             "languages": Language.choices,
+            "word": word,
             "fps": settings.CLIP_DEFAULT_FPS,
             "max_frames": settings.CLIP_MAX_FRAMES,
             "max_bytes": settings.CLIP_MAX_SIZE_BYTES,

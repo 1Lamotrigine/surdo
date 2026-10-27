@@ -126,16 +126,25 @@ def create_sign(
     description: str = "",
     clip: bytes | None = None,
     status: str = SignStatus.DRAFT,
+    unknown_word: UnknownWord | None = None,
 ) -> Sign:
     """Создать жест редактора и, если передан файл, приложить к нему клип.
 
     Клип сохраняется в хранилище (``services.clips``) и его путь и метаданные
     записываются в ``SignClip``. Формат клипа проверяется до записи на диск.
+
+    Если передан ``unknown_word`` (D4), слово должно быть взято в работу
+    (``queued``): в той же транзакции оно становится ``recorded``. Так слово
+    очереди не теряется, если создание жеста или клипа не удалось.
     """
     gloss = _clean_gloss(gloss)
     lang = _clean_lang(lang)
     if status not in SignStatus.values:
         raise SignValidationError(f"Неизвестный статус: {status}.")
+    if unknown_word is not None and unknown_word.status != UnknownWordStatus.QUEUED:
+        raise SignValidationError(
+            f"Слово «{unknown_word.lemma}» нужно сначала взять в работу."
+        )
 
     meta: ClipMeta | None = None
     if clip is not None:
@@ -154,6 +163,11 @@ def create_sign(
         )
         if clip is not None and meta is not None:
             _attach_clip(sign, clip, meta)
+        if unknown_word is not None:
+            try:
+                mark_unknown_word_recorded(unknown_word)
+            except UnknownWordValidationError as exc:
+                raise SignValidationError(str(exc)) from exc
     return sign
 
 

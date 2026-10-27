@@ -13,7 +13,9 @@ from dictionary.models import (
     Sign,
     SignClip,
     SignStatus,
+    UnknownWordStatus,
 )
+from dictionary.services import queue_unknown_word, record_unknown_word
 from services.clips import pack_clip
 
 pytestmark = pytest.mark.django_db
@@ -305,6 +307,59 @@ def test_create_sign_rejects_oversized_file(client, editor, settings, tmp_path):
     )
 
     assert response.status_code == 413
+    assert Sign.objects.count() == 0
+
+
+def test_create_sign_with_clip_marks_queued_word_recorded(
+    client, editor, settings, tmp_path
+):
+    settings.MEDIA_ROOT = tmp_path
+    word = record_unknown_word("ИВАНОВ")
+    queue_unknown_word(word)
+    client.force_login(editor)
+
+    response = client.post(
+        reverse("api-sign-create"),
+        {
+            "gloss": "ИВАНОВ",
+            "lang": Language.RSL,
+            "unknown_word": word.pk,
+            "clip": _clip_file(gloss="ИВАНОВ"),
+        },
+    )
+
+    assert response.status_code == 201
+    word.refresh_from_db()
+    assert word.status == UnknownWordStatus.RECORDED
+    assert response.json()["unknown_word"]["id"] == word.pk
+    assert response.json()["unknown_word"]["status"] == UnknownWordStatus.RECORDED
+    assert SignClip.objects.count() == 1
+
+
+def test_create_sign_rejects_word_not_queued(client, editor):
+    word = record_unknown_word("ИВАНОВ")
+    client.force_login(editor)
+
+    response = client.post(
+        reverse("api-sign-create"),
+        {"gloss": "ИВАНОВ", "unknown_word": word.pk},
+    )
+
+    assert response.status_code == 400
+    assert Sign.objects.count() == 0
+    word.refresh_from_db()
+    assert word.status == UnknownWordStatus.NEW
+
+
+def test_create_sign_rejects_missing_queue_word(client, editor):
+    client.force_login(editor)
+
+    response = client.post(
+        reverse("api-sign-create"),
+        {"gloss": "ИВАНОВ", "unknown_word": 9999},
+    )
+
+    assert response.status_code == 404
     assert Sign.objects.count() == 0
 
 

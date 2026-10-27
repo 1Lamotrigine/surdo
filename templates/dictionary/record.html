@@ -11,9 +11,10 @@
            data-record-fps="{{ fps }}"
            data-record-max-frames="{{ max_frames }}"
            data-record-max-bytes="{{ max_bytes }}"
-           data-avatar-model-url="{{ avatar_model_url }}">
+           data-avatar-model-url="{{ avatar_model_url }}"
+           data-record-word-id="{{ word.pk|default:'' }}">
     <header class="record-head">
-      <p class="eyebrow">Редактор словаря · этап D3</p>
+      <p class="eyebrow">Редактор словаря · этап D4</p>
       <h1>Запись жеста с камеры</h1>
       <p class="lead">
         Включите камеру и встаньте так, чтобы в кадр попали лицо, корпус и обе
@@ -21,6 +22,17 @@
         а поверх видео рисуется скелет. Видео не отправляется на сервер.
       </p>
     </header>
+
+    {% if word %}
+      <aside class="notice record-word" data-record-word>
+        <p>
+          Запись для слова <strong>«{{ word.lemma }}»</strong>
+          ({{ word.get_lang_display }}) из очереди нераспознанных: оно встретилось
+          {{ word.count }} раз. После успешного сохранения черновика слово
+          получит статус «Записано».
+        </p>
+      </aside>
+    {% endif %}
 
     <div class="record-stage" data-record-stage>
       <video class="record-video" data-record-video muted playsinline aria-label="Видео с камеры"></video>
@@ -87,7 +99,7 @@
     </section>
 
     <section class="record-preview" data-record-preview hidden aria-labelledby="record-preview-title">
-      <h2 id="record-preview-title">Предпросмотр на аватаре и сохранение (D3)</h2>
+      <h2 id="record-preview-title">Предпросмотр на аватаре и сохранение (D3–D4)</h2>
       <p>
         Собранный клип загружается в аватар тем же ретаргетом, что и в комнате.
         Если что-то не так, вернитесь к ползункам обрезки и запишите заново.
@@ -130,13 +142,14 @@
           <label class="avatar-field">
             <span>Глосса</span>
             <input type="text" name="gloss" maxlength="100" autocomplete="off" required
+                   value="{{ word.lemma|default:'' }}"
                    placeholder="Например, УЧЕБНИК" data-sign-gloss>
           </label>
           <label class="avatar-field">
             <span>Язык</span>
             <select name="lang" data-sign-lang>
               {% for value, label in languages %}
-                <option value="{{ value }}">{{ label }}</option>
+                <option value="{{ value }}"{% if word and word.lang == value %} selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
           </label>
@@ -153,6 +166,10 @@
           {% if user.is_staff %}
             <a class="button button-secondary" data-sign-admin hidden
                href="{% url 'admin:dictionary_sign_changelist' %}">Открыть в Django Admin</a>
+          {% endif %}
+          {% if word %}
+            <a class="button button-secondary" data-sign-queue hidden
+               href="{% url 'dictionary:unknown-queue' %}">Вернуться в очередь</a>
           {% endif %}
         </div>
         <p class="record-save-status" data-sign-status data-state="idle" aria-live="polite">

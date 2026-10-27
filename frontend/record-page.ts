@@ -1,5 +1,5 @@
 /**
- * Инструмент записи жестов (D1–D3): камера, скелет MediaPipe, запись, обрезка,
+ * Инструмент записи жестов (D1–D4): камера, скелет MediaPipe, запись, обрезка,
  * упаковка клипа, предпросмотр на аватаре и сохранение черновика.
  *
  * Страница `GET /dictionary/record/` открывает камеру по кнопке и рисует поверх
@@ -7,7 +7,9 @@
  * метками времени; после остановки пустые края обрезаются, кадры пересобираются
  * на 30 FPS, сглаживаются One Euro и упаковываются в `.json.gz`. Полученный
  * файл сразу распаковывается обратно — это проверка обратимости формата. D3
- * добавляет аватар и форму метаданных: жест уходит в API черновиком.
+ * добавляет аватар и форму метаданных: жест уходит в API черновиком. D4
+ * открывает страницу для слова очереди и после сохранения помечает его
+ * записанным.
  */
 
 import { Avatar } from "./avatar";
@@ -97,12 +99,15 @@ function setupRecordPage(root: HTMLElement): void {
   const signSave = root.querySelector<HTMLButtonElement>("[data-sign-save]");
   const signStatus = root.querySelector<HTMLElement>("[data-sign-status]");
   const signAdmin = root.querySelector<HTMLAnchorElement>("[data-sign-admin]");
+  const signQueue = root.querySelector<HTMLAnchorElement>("[data-sign-queue]");
   if (!video || !canvas) return;
 
   const context = canvas.getContext("2d");
   const wasmBasePath = root.dataset.mediapipeWasm?.trim() ?? "";
   const modelUrl = root.dataset.mediapipeModelUrl?.trim() ?? "";
   const avatarModelUrl = root.dataset.avatarModelUrl?.trim() ?? "";
+  const rawWordId = Number.parseInt(root.dataset.recordWordId?.trim() ?? "", 10);
+  const unknownWordId = Number.isFinite(rawWordId) ? rawWordId : null;
   const fps = positiveNumber(root.dataset.recordFps, 30);
   const maxFrames = Math.max(1, Math.round(positiveNumber(root.dataset.recordMaxFrames, 300)));
   const maxBytes = Math.max(1, positiveNumber(root.dataset.recordMaxBytes, 2 * 1024 * 1024));
@@ -215,6 +220,7 @@ function setupRecordPage(root: HTMLElement): void {
     savedSignId = null;
     setDraftFieldsDisabled(false);
     if (signAdmin) signAdmin.hidden = true;
+    if (signQueue) signQueue.hidden = true;
     updateSaveButton();
   };
 
@@ -488,14 +494,25 @@ function setupRecordPage(root: HTMLElement): void {
         draft: validation.draft,
         file: new Blob([file as BlobPart], { type: "application/gzip" }),
         filename: `zapis-${currentClipFrames}f.json.gz`,
+        unknownWordId,
       });
       savedSignId = payload.id;
       setDraftFieldsDisabled(true);
       if (signAdmin) signAdmin.hidden = false;
-      setSignStatus(
-        "running",
-        `Черновик №${payload.id} «${payload.gloss}» сохранён. Он появится в Django Admin.`,
-      );
+      const recordedWord = payload.unknown_word;
+      if (recordedWord) {
+        if (signQueue) signQueue.hidden = false;
+        setSignStatus(
+          "running",
+          `Черновик №${payload.id} «${payload.gloss}» сохранён. ` +
+            `Слово «${recordedWord.lemma}» отмечено записанным.`,
+        );
+      } else {
+        setSignStatus(
+          "running",
+          `Черновик №${payload.id} «${payload.gloss}» сохранён. Он появится в Django Admin.`,
+        );
+      }
     } catch (error) {
       setSignStatus("error", `Не удалось сохранить: ${errorMessage(error)}`);
     } finally {
