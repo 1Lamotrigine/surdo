@@ -105,6 +105,45 @@ def test_teacher_live_page_shows_chat_and_presence(client, owner):
     assert "data-presence-list" in html
 
 
+def test_detail_shows_management_actions(client, owner):
+    room = Room.objects.create(owner=owner, join_code="MANAGE")
+    client.force_login(owner)
+
+    html = client.get(
+        reverse("rooms:detail", kwargs={"join_code": room.join_code})
+    ).content.decode()
+
+    assert "Сменить ID" in html
+    assert "Закрыть комнату" in html
+    assert reverse("rooms:close", kwargs={"join_code": room.join_code}) in html
+    assert reverse("rooms:rotate-code", kwargs={"join_code": room.join_code}) in html
+
+
+def test_live_page_marks_teacher_view_and_remove_url(client, owner):
+    room = Room.objects.create(owner=owner, join_code="LIVE04")
+    client.force_login(owner)
+
+    html = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code})).content.decode()
+
+    assert "data-teacher-view" in html
+    assert "data-remove-participant-url" in html
+    assert f"/rooms/{room.join_code}/participants/0/remove/" in html
+    assert "data-csrf-token" in html
+
+
+def test_closed_room_detail_hides_management_actions(client, owner):
+    room = Room.objects.create(owner=owner, join_code="CLOSED")
+    room.close()
+    client.force_login(owner)
+
+    html = client.get(
+        reverse("rooms:detail", kwargs={"join_code": room.join_code})
+    ).content.decode()
+
+    assert "Сменить ID" not in html
+    assert "Закрыть комнату" not in html
+
+
 def test_teacher_live_rejects_other_teacher(client, owner, other_teacher):
     room = Room.objects.create(owner=owner, join_code="LIVE02")
     client.force_login(other_teacher)

@@ -50,6 +50,27 @@
               <a class="button button-secondary" href="{% url 'rooms:create' %}">Создать ещё</a>
               <span class="copy-status" data-copy-status aria-live="polite"></span>
             </div>
+
+            <div class="room-actions room-actions-manage">
+              <form method="post" action="{% url 'rooms:rotate-code' join_code=room.join_code %}">
+                {% csrf_token %}
+                <button class="button button-secondary" type="submit"
+                        data-confirm="Сменить ID? Старый QR-код перестанет работать.">
+                  Сменить ID
+                </button>
+              </form>
+              <form method="post" action="{% url 'rooms:close' join_code=room.join_code %}">
+                {% csrf_token %}
+                <button class="button button-danger" type="submit"
+                        data-confirm="Закрыть комнату? Участники будут отключены.">
+                  Закрыть комнату
+                </button>
+              </form>
+            </div>
+            <p class="room-help">
+              Смена ID делает старый QR-код недействительным. Закрытие отключает
+              участников и запрещает новые входы.
+            </p>
           </div>
         </div>
 

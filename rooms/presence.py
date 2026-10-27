@@ -98,6 +98,15 @@ def remove_connection(room_id: int, key: str) -> list[PresenceEntry]:
     return _entries(data)
 
 
+def remove_key(room_id: int, key: str) -> list[PresenceEntry]:
+    """Убрать все соединения участника (при удалении из комнаты)."""
+    data = _load(room_id)
+    if key in data:
+        data.pop(key, None)
+        _store(room_id, data)
+    return _entries(data)
+
+
 def touch(room_id: int, key: str) -> list[PresenceEntry]:
     """Продлить TTL записи (используется heartbeat на A11)."""
     data = _load(room_id)

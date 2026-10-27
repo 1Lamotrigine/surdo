@@ -76,7 +76,14 @@ app/
   При подключении consumer сразу присылает `chat_history` (последние 50
   сообщений). Текст нормализуется и ограничен 500 символами; есть rate limit
   (`CHAT_RATE_LIMIT_MESSAGES`/`CHAT_RATE_LIMIT_WINDOW`). Границы этапов: чат — A9,
-  heartbeat — A11, закрытие комнаты — A10.
+  управление комнатой — A10, heartbeat — A11.
+- Управление комнатой (A10): сервис `rooms/management.py` (`close_room`,
+  `rotate_join_code`, `remove_participant`) рассылает `room_closed` /
+  `participant_removed` в группу `room_<id>` и закрывает соединения кодом 4403.
+  HTTP-действия преподавателя (только владелец/админ, POST):
+  `/rooms/<code>/close/`, `/rooms/<code>/rotate-code/`,
+  `/rooms/<code>/participants/<id>/remove/`. Смена ID не меняет `room.id` —
+  группа та же, старый код перестаёт находиться.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при

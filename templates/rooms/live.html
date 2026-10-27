@@ -4,7 +4,10 @@
 {% block title %}Панель комнаты {{ room.join_code }} · ИИ-аватар сурдопереводчик{% endblock %}
 
 {% block content %}
-  <section class="teacher-live" data-room-live data-join-code="{{ room.join_code }}">
+  <section class="teacher-live" data-room-live data-teacher-view
+           data-join-code="{{ room.join_code }}"
+           data-remove-participant-url="{% url 'rooms:remove-participant' join_code=room.join_code participant_id=0 %}"
+           data-csrf-token="{{ csrf_token }}">
     <header class="teacher-live-head">
       <div>
         <p class="eyebrow">Панель преподавателя</p>
@@ -16,9 +19,27 @@
           </span>
         </p>
       </div>
-      <a class="button button-secondary" href="{% url 'rooms:detail' join_code=room.join_code %}">
-        QR и ID для студентов
-      </a>
+      <div class="teacher-live-actions">
+        <a class="button button-secondary" href="{% url 'rooms:detail' join_code=room.join_code %}">
+          QR и ID для студентов
+        </a>
+        {% if room.is_open %}
+          <form method="post" action="{% url 'rooms:rotate-code' join_code=room.join_code %}">
+            {% csrf_token %}
+            <button class="button button-secondary" type="submit"
+                    data-confirm="Сменить ID? Старый QR-код перестанет работать.">
+              Сменить ID
+            </button>
+          </form>
+          <form method="post" action="{% url 'rooms:close' join_code=room.join_code %}">
+            {% csrf_token %}
+            <button class="button button-danger" type="submit"
+                    data-confirm="Закрыть комнату? Участники будут отключены.">
+              Закрыть комнату
+            </button>
+          </form>
+        {% endif %}
+      </div>
     </header>
 
     {% if room.is_closed %}

@@ -2,6 +2,7 @@
 
 from django.contrib import admin
 
+from rooms.management import rotate_join_code
 from rooms.models import Message, Participant, Room
 
 
@@ -38,7 +39,7 @@ class RoomAdmin(admin.ModelAdmin):
     list_select_related = ("owner",)
     readonly_fields = ("join_code", "created_at", "closed_at")
     inlines = (ParticipantInline, MessageInline)
-    actions = ("close_rooms",)
+    actions = ("close_rooms", "rotate_codes")
 
     @admin.action(description="Закрыть выбранные комнаты")
     def close_rooms(self, request, queryset):
@@ -47,6 +48,14 @@ class RoomAdmin(admin.ModelAdmin):
             room.close()
             closed += 1
         self.message_user(request, f"Закрыто комнат: {closed}.")
+
+    @admin.action(description="Сменить ID выбранных комнат")
+    def rotate_codes(self, request, queryset):
+        rotated = 0
+        for room in queryset.filter(status=Room.Status.OPEN):
+            rotate_join_code(room)
+            rotated += 1
+        self.message_user(request, f"Сменён ID у комнат: {rotated}.")
 
 
 @admin.register(Participant)

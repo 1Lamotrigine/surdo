@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A9 — чат: готов.**
+**A10 — управление комнатой: готов.**
 
 ## Что готово
 
@@ -85,6 +85,17 @@
   превышении приходит `chat_error`.
 - **Панель преподавателя (A9):** `GET /rooms/<code>/live/` — QR, ID, чат и
   участники в реальном времени; ссылка «Открыть панель» на странице комнаты.
+- **Управление комнатой (A10):** `rooms/management.py` — `close_room` (закрыть и
+  разослать `room_closed`), `rotate_join_code` (сменить ID с повтором при
+  коллизии), `remove_participant` (удалить участника, закрыть его соединения и
+  обновить presence). Рассылка идёт в группу `room_<id>` через `async_to_sync`.
+- **Действия преподавателя (A10):** `POST /rooms/<code>/close/`,
+  `POST /rooms/<code>/rotate-code/`, `POST /rooms/<code>/participants/<id>/remove/`
+  (только владелец/админ). Кнопки «Сменить ID» и «Закрыть комнату» на странице
+  комнаты и панели; «Удалить» рядом с участником в панели (JS рисует кнопку).
+- **События управления (A10):** `room_closed` и `participant_removed` — сервер
+  шлёт их и закрывает соединение кодом 4403; клиент на 4403 не переподключается.
+  При закрытии presence комнаты очищается, при удалении — только ключ участника.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -110,6 +121,10 @@
 | WebSocket комнаты | `WS /ws/rooms/<code>/` → `rooms.consumers.RoomConsumer` |
 | Панель преподавателя | `GET /rooms/<code>/live/` → `rooms.views.room_live` |
 | История чата (API) | `GET /api/rooms/<code>/history/` → `rooms.api.chat_history_api` |
+| Закрыть комнату | `POST /rooms/<code>/close/` → `rooms.views.room_close` |
+| Сменить ID комнаты | `POST /rooms/<code>/rotate-code/` → `rooms.views.room_rotate_code` |
+| Удалить участника | `POST /rooms/<code>/participants/<id>/remove/` → `rooms.views.room_remove_participant` |
+| Управление комнатой (сервис) | `rooms.management` (close_room, rotate_join_code, remove_participant) |
 | Админка | `GET /admin/` |
 | WebSocket-эхо (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
@@ -140,7 +155,12 @@
   создания/просмотра/панели комнаты, доступ по ролям, JSON API создания и истории,
   вход студента (гостевая сессия, 404/410/429, name-валидация), rate limit, модель
   участника, модель сообщения и сервисные функции чата, `RoomConsumer` (изоляция
-  комнат, 4401/4403, presence, ping/pong, чат, история, rate limit).
+  комнат, 4401/4403, presence, ping/pong, чат, история, rate limit,
+  `room_closed`/`participant_removed`).
+- `rooms/tests/test_management.py` — сервисные функции и HTTP-действия A10:
+  смена ID (включая повтор при коллизии и недействительность старого кода),
+  закрытие (идемпотентность, очистка presence), удаление участника (presence,
+  редирект удалённого гостя), права доступа, admin-действие смены ID.
 - Тесты WebSocket синхронные: сценарий целиком выполняется в `asyncio.run`,
   `CHANNEL_LAYERS` на время теста подменяется на in-memory через `settings`.
 
@@ -183,28 +203,41 @@
   TTL, а не в отдельном Redis-множестве: так одна абстракция работает и с Redis, и
   с локальным кэшем. Участник онлайн, пока у него есть хотя бы одна вкладка
   (`count > 0`).
-- `RoomConsumer` умеет `ping`/`pong`, `chat` и рассылку `presence`/`chat_message`.
-  События фраз (`asr_text`, `utterance`) появятся в блоке E, heartbeat — A11,
-  закрытие комнаты — A10.
+- `RoomConsumer` умеет `ping`/`pong`, `chat`, рассылку `presence`/`chat_message`
+  и закрытие по `room_closed`/`participant_removed`. События фраз (`asr_text`,
+  `utterance`) появятся в блоке E, heartbeat — A11.
+- Смена ID не меняет `room.id`, поэтому группа Channels остаётся прежней: старый
+  код и QR перестают находить комнату (поиск идёт среди открытых), а уже
+  подключённые вкладки живут до переподключения. Событие `room_closed` при этом
+  не рассылается — комната остаётся открытой.
+- Удаление участника закрывает только его соединения: ключ соединения гостя
+  `session:<session_key>` передаётся в событии, и совпавший consumer закрывается
+  кодом 4403, а остальные получают обновлённый presence. Удалённый гость не может
+  переподключиться (`removed_at__isnull=True` в `resolve_connection`) и при заходе
+  на страницу перенаправляется на форму входа заново.
+- Подтверждение опасных действий (`data-confirm`) обрабатывается глобально в
+  `frontend/main.ts`; кнопка «Удалить» у участника рисуется в `room-live.ts` и
+  отправляет обычную POST-форму с CSRF-токеном из `data-csrf-token`.
 - Чат хранится в `rooms.Message`. Автор фиксируется в `author_name` (имя гостя
   или имя преподавателя) и `is_teacher`, чтобы история читалась без join к User.
 - История отдаётся по возрастанию id: при подключении — последние 50, через
   `?after_message_id` — только новые; клиент отсекает дубликаты по id.
 
-## Проверка A9
+## Проверка A10
 
 ```bash
-make check          # ruff + tsc + vite build + 108 тестов — зелёный
+make check          # ruff + tsc + vite build + 134 теста — зелёный
 ```
 
-Проверено вручную: при подключении приходит `chat_history`; сообщение гостя
-нормализуется («  Привет   всем  » → «Привет всем») и рассылается всем участникам;
-сообщение преподавателя помечено `is_teacher`; всё сохраняется в `rooms.Message`.
-API истории отдаёт сообщения владельцу/админу и гостю с сессией, 403 — постороннему.
+Критерий этапа выполнен: после смены ID старый код даёт 404, а старый QR ведёт
+на него же; после закрытия комнаты участники получают `room_closed` и соединение
+закрывается (4403), новые входы запрещены (410); удалённый участник отключается
+(4403), не может переподключиться и пропадает из presence у остальных.
 
 ## Дальше
 
-**A10 — управление комнатой:** закрыть комнату, удалить участника, сменить ID.
-Критерий: старый ID и QR перестают работать, участники получают `room_closed`.
-Читать: `docs/spec/requirements.md` (раздел 3.1), `docs/spec/ws-events.md`,
-`docs/spec/db-schema.md`.
+**A11 — heartbeat и переподключение:** ping/pong (заготовка уже есть), повтор с
+нарастающей паузой, endpoint истории `GET /api/rooms/<code>/history/`
+(`?after_seq`/`?after_message_id`), отсечение дубликатов по seq и id.
+Критерий: после обрыва клиент получает пропущенные фразы и сообщения без повторов.
+Читать: `docs/spec/ws-events.md` (раздел 7.6), `docs/spec/api.md`.

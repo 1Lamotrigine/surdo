@@ -4,9 +4,10 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from rooms.forms import GuestNameForm, RoomForm
+from rooms.management import close_room, remove_participant, rotate_join_code
 from rooms.models import Participant, Room
 from rooms.permissions import room_creator_required
 from rooms.qr import build_join_url, room_qr_svg
@@ -89,6 +90,55 @@ def room_live(request: HttpRequest, join_code: str):
     )
 
 
+@require_POST
+@room_creator_required
+def room_close(request: HttpRequest, join_code: str):
+    """Закрыть комнату: старый ID и QR перестают работать."""
+    room = _get_room_or_404(join_code)
+    if not _can_view_room(request.user, room):
+        raise PermissionDenied("Нет доступа к этой комнате.")
+
+    close_room(room)
+    messages.success(request, f"Комната {room.join_code} закрыта.")
+    return redirect("rooms:detail", join_code=room.join_code)
+
+
+@require_POST
+@room_creator_required
+def room_rotate_code(request: HttpRequest, join_code: str):
+    """Сменить ID комнаты: старый QR перестаёт работать."""
+    room = _get_room_or_404(join_code)
+    if not _can_view_room(request.user, room):
+        raise PermissionDenied("Нет доступа к этой комнате.")
+
+    if room.is_closed:
+        messages.error(request, "Комната закрыта: ID не меняется.")
+        return redirect("rooms:detail", join_code=room.join_code)
+
+    old_code = room.join_code
+    new_code = rotate_join_code(room)
+    messages.success(request, f"ID комнаты изменён: {old_code} → {new_code}.")
+    return redirect("rooms:detail", join_code=new_code)
+
+
+@require_POST
+@room_creator_required
+def room_remove_participant(request: HttpRequest, join_code: str, participant_id: int):
+    """Удалить участника из комнаты."""
+    room = _get_room_or_404(join_code)
+    if not _can_view_room(request.user, room):
+        raise PermissionDenied("Нет доступа к этой комнате.")
+
+    participant = get_object_or_404(Participant, pk=participant_id, room=room)
+    if participant.user_id is not None and participant.user_id == room.owner_id:
+        messages.error(request, "Нельзя удалить владельца комнаты.")
+        return redirect("rooms:live", join_code=room.join_code)
+
+    remove_participant(participant)
+    messages.success(request, f"Участник {participant.display_name} удалён.")
+    return redirect("rooms:live", join_code=room.join_code)
+
+
 @require_http_methods(["GET", "POST"])
 def room_join(request: HttpRequest, join_code: str):
     """Вход студента: гостевая сессия по имени, без регистрации."""
@@ -157,12 +207,20 @@ def room_student(request: HttpRequest, join_code: str):
         participant = Participant.objects.filter(room=room, user=request.user).first()
     elif name:
         participant = (
-            Participant.objects.filter(room=room, session_key=request.session.session_key)
+            Participant.objects.filter(
+                room=room,
+                session_key=request.session.session_key,
+                removed_at__isnull=True,
+            )
             .order_by("-joined_at")
             .first()
         )
 
     if participant is None and not name:
+        return redirect("room_student:join", join_code=room.join_code)
+    if participant is None and name:
+        # Удалён преподавателем: отправляем на форму входа заново.
+        messages.warning(request, "Преподаватель удалил вас из комнаты. Войдите снова.")
         return redirect("room_student:join", join_code=room.join_code)
 
     return render(

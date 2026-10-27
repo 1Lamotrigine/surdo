@@ -25,6 +25,7 @@ type ServerEvent =
   | { type: "chat_error"; error: string; retry_after?: number }
   | { type: "pong" }
   | { type: "room_closed" }
+  | { type: "participant_removed" }
   | { type: string; [key: string]: unknown };
 
 const PING_INTERVAL_MS = 20_000;
@@ -58,9 +59,13 @@ export function setupRoomLive(root: HTMLElement): void {
   const chatForm = root.querySelector<HTMLFormElement>("[data-chat-form]");
   const chatInput = root.querySelector<HTMLTextAreaElement>("[data-chat-input]");
   const chatHint = root.querySelector<HTMLElement>("[data-chat-hint]");
+  const isTeacherView = root.hasAttribute("data-teacher-view");
+  const removeParticipantUrl = root.dataset.removeParticipantUrl;
+  const csrfToken = root.dataset.csrfToken;
   let pingTimer: number | undefined;
   let socket: WebSocket | undefined;
   let lastMessageId = 0;
+  let closed = false;
 
   const setStatus = (text: string, state: "loading" | "ready" | "error"): void => {
     if (status) {
@@ -69,12 +74,45 @@ export function setupRoomLive(root: HTMLElement): void {
     }
   };
 
+  const removeParticipant = (participantId: number): void => {
+    if (!removeParticipantUrl) return;
+    const form = document.createElement("form");
+    form.method = "post";
+    // URL шаблона приходит с id=0: /rooms/<code>/participants/0/remove/.
+    form.action = removeParticipantUrl.replace("/0/", `/${participantId}/`);
+
+    const token = document.createElement("input");
+    token.type = "hidden";
+    token.name = "csrfmiddlewaretoken";
+    token.value = csrfToken ?? "";
+    form.append(token);
+
+    document.body.append(form);
+    form.submit();
+  };
+
   const renderPresence = (participants: PresenceEntry[]): void => {
     if (!presenceList) return;
     presenceList.innerHTML = "";
     for (const person of participants) {
       const item = document.createElement("li");
-      item.textContent = person.guest ? person.name : `${person.name} (преподаватель)`;
+      item.className = "presence-item";
+      const label = document.createElement("span");
+      label.textContent = person.guest ? person.name : `${person.name} (преподаватель)`;
+      item.append(label);
+
+      if (isTeacherView && person.participant_id != null) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button button-secondary button-small";
+        button.textContent = "Удалить";
+        button.addEventListener("click", () => {
+          if (window.confirm(`Удалить ${person.name} из комнаты?`)) {
+            removeParticipant(person.participant_id as number);
+          }
+        });
+        item.append(button);
+      }
       presenceList.append(item);
     }
   };
@@ -138,14 +176,18 @@ export function setupRoomLive(root: HTMLElement): void {
             ? "Слишком часто. Подождите несколько секунд."
             : payload.error;
       } else if (payload.type === "room_closed") {
+        closed = true;
         setStatus("Комната закрыта", "error");
+      } else if (payload.type === "participant_removed") {
+        closed = true;
+        setStatus("Преподаватель удалил вас из комнаты", "error");
       }
     });
 
     socket.addEventListener("close", (event: CloseEvent) => {
       window.clearInterval(pingTimer);
-      if (NON_RETRYABLE_CODES.has(event.code)) {
-        setStatus("Нет доступа к комнате", "error");
+      if (closed || NON_RETRYABLE_CODES.has(event.code)) {
+        setStatus(closed ? status?.textContent ?? "Комната недоступна" : "Нет доступа к комнате", "error");
         return;
       }
       setStatus("Соединение потеряно, переподключение…", "loading");

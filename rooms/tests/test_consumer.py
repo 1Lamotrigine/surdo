@@ -329,6 +329,104 @@ def test_empty_message_returns_chat_error(websocket_settings, open_room):
     asyncio.run(run_scenario(scenario))
 
 
+def test_room_closed_event_closes_connection(websocket_settings, open_room):
+    cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        await connect_guest(client)
+
+        # HTTP-действие закрытия рассылает событие в группу (здесь — напрямую).
+        from channels.layers import get_channel_layer
+
+        await get_channel_layer().group_send(
+            f"room_{open_room.pk}", {"type": "room.closed", "room_id": open_room.pk}
+        )
+
+        event = await receive_type(client, "room_closed")
+        assert event["type"] == "room_closed"
+
+        # Сервер закрывает соединение кодом 4403 — клиент не переподключается.
+        close_event = await client.receive_output(timeout=1.0)
+        assert close_event["type"] == "websocket.close"
+        assert close_event["code"] == 4403
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_removed_participant_is_disconnected(websocket_settings, open_room):
+    cookie = make_guest_session_cookie(open_room, "Удаляемый")
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        await connect_guest(client)
+
+        participant = await database_sync_to_async(
+            lambda: Participant.objects.get(room=open_room, guest_name="Удаляемый")
+        )()
+        from rooms.management import remove_participant
+
+        await database_sync_to_async(remove_participant)(participant)
+
+        event = await receive_type(client, "participant_removed")
+        assert event["type"] == "participant_removed"
+
+        close_event = await client.receive_output(timeout=1.0)
+        assert close_event["type"] == "websocket.close"
+        assert close_event["code"] == 4403
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_removed_participant_cannot_reconnect(websocket_settings, open_room):
+    cookie = make_guest_session_cookie(open_room, "Удаляемый")
+
+    async def scenario() -> None:
+        participant = await database_sync_to_async(
+            lambda: Participant.objects.get(room=open_room, guest_name="Удаляемый")
+        )()
+        from rooms.management import remove_participant
+
+        await database_sync_to_async(remove_participant)(participant)
+
+        client = make_communicator(open_room.join_code, cookie)
+        connected, code = await client.connect()
+        assert (connected, code) == (False, 4401)
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_other_guest_gets_presence_when_one_removed(websocket_settings, open_room):
+    keeper_cookie = make_guest_session_cookie(open_room, "Остаётся")
+    removed_cookie = make_guest_session_cookie(open_room, "Удаляемый")
+
+    async def scenario() -> None:
+        keeper = make_communicator(open_room.join_code, keeper_cookie)
+        await connect_guest(keeper)
+        removed = make_communicator(open_room.join_code, removed_cookie)
+        await connect_guest(removed)
+
+        participant = await database_sync_to_async(
+            lambda: Participant.objects.get(room=open_room, guest_name="Удаляемый")
+        )()
+        from rooms.management import remove_participant
+
+        await database_sync_to_async(remove_participant)(participant)
+
+        # Читаем presence, пока не придёт обновление без удалённого участника.
+        names = {"Остаётся", "Удаляемый"}
+        for _ in range(5):
+            event = await receive_type(keeper, "presence")
+            names = {p["name"] for p in event["participants"]}
+            if "Удаляемый" not in names:
+                break
+        assert "Удаляемый" not in names
+
+        await keeper.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
 def test_chat_rate_limit(websocket_settings, open_room, settings):
     settings.CHAT_RATE_LIMIT_MESSAGES = 2
     settings.CHAT_RATE_LIMIT_WINDOW = 5

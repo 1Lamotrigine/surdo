@@ -2,7 +2,9 @@
 
 A8: проверка кода и сессии в `connect()`, группа `room_<id>`, presence.
 A9: чат — приём `{type: chat, body}`, рассылка `chat_message`, догрузка истории
-при подключении. Heartbeat (A11) и `room_closed` (A10) появятся позже.
+при подключении.
+A10: `room_closed` закрывает соединения, `participant_removed` закрывает
+соединения удалённого участника. Heartbeat — A11.
 """
 
 import logging
@@ -157,3 +159,20 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
         """Событие A10: комната закрыта преподавателем."""
         await self.send_json({"type": "room_closed"})
         await self.close(code=CLOSE_NO_ACCESS)
+
+    async def participant_removed(self, event: dict) -> None:
+        """Событие A10: участник удалён преподавателем.
+
+        Удалённый получает `participant_removed` и отключение (переподключение
+        бессмысленно — 4403), остальные — обновлённый presence.
+        """
+        if event.get("connection_key") == self.connection_key:
+            await self.send_json({"type": "participant_removed"})
+            await self.close(code=CLOSE_NO_ACCESS)
+            return
+        await self.send_json(
+            {
+                "type": "presence",
+                "participants": event.get("participants", []),
+            }
+        )
