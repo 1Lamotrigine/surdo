@@ -109,6 +109,10 @@ else:
 JOIN_RATE_LIMIT_ATTEMPTS = int(os.environ.get("JOIN_RATE_LIMIT_ATTEMPTS", "10"))
 JOIN_RATE_LIMIT_WINDOW = int(os.environ.get("JOIN_RATE_LIMIT_WINDOW", "60"))
 
+# Ограничение чата: сообщений за окно на участника.
+CHAT_RATE_LIMIT_MESSAGES = int(os.environ.get("CHAT_RATE_LIMIT_MESSAGES", "5"))
+CHAT_RATE_LIMIT_WINDOW = int(os.environ.get("CHAT_RATE_LIMIT_WINDOW", "5"))
+
 DATABASES = {
     "default": dj_database_url.parse(
         os.environ.get(

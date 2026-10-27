@@ -156,3 +156,47 @@ class Participant(models.Model):
             return
         self.removed_at = timezone.now()
         self.save(update_fields=("removed_at",))
+
+
+class Message(models.Model):
+    """Сообщение чата комнаты."""
+
+    room = models.ForeignKey(
+        Room,
+        on_delete=models.CASCADE,
+        related_name="messages",
+        verbose_name="комната",
+    )
+    participant = models.ForeignKey(
+        Participant,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="messages",
+        verbose_name="участник",
+    )
+    author_name = models.CharField("автор", max_length=150)
+    is_teacher = models.BooleanField("преподаватель", default=False)
+    body = models.CharField("текст", max_length=500)
+    created_at = models.DateTimeField("отправлено", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "сообщение"
+        verbose_name_plural = "сообщения"
+        ordering = ("created_at", "id")
+        indexes = [
+            models.Index(fields=("room", "created_at"), name="message_room_created_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.author_name}: {self.body[:40]}"
+
+    def as_event(self) -> dict:
+        """Представление сообщения для события `chat_message`."""
+        return {
+            "id": self.pk,
+            "user": self.author_name,
+            "body": self.body,
+            "ts": self.created_at.isoformat(),
+            "is_teacher": self.is_teacher,
+        }

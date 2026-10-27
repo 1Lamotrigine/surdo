@@ -3,7 +3,7 @@
 from django.db import IntegrityError, transaction
 
 from rooms.codes import generate_join_code
-from rooms.models import Participant, Room
+from rooms.models import Message, Participant, Room
 
 MAX_JOIN_CODE_ATTEMPTS = 20
 
@@ -12,9 +12,17 @@ GUEST_ROOMS_SESSION_KEY = "rooms"
 GUEST_SESSION_KEY_SESSION_KEY = "session_key"
 MAX_GUEST_NAME_LENGTH = 100
 
+# Ограничения чата.
+MAX_MESSAGE_LENGTH = 500
+CHAT_HISTORY_LIMIT = 50
+
 
 class JoinCodeGenerationError(RuntimeError):
     """Не удалось подобрать свободный код комнаты."""
+
+
+class ChatValidationError(ValueError):
+    """Сообщение чата не прошло проверку."""
 
 
 def find_open_room(join_code: str) -> Room | None:
@@ -118,3 +126,41 @@ def create_room(
     raise JoinCodeGenerationError(
         f"Не удалось сгенерировать свободный код за {MAX_JOIN_CODE_ATTEMPTS} попыток"
     )
+
+
+def clean_message_body(body: str) -> str:
+    """Нормализовать и проверить текст чата."""
+    text = " ".join((body or "").split())
+    if not text:
+        raise ChatValidationError("Сообщение не может быть пустым.")
+    if len(text) > MAX_MESSAGE_LENGTH:
+        raise ChatValidationError(f"Сообщение длиннее {MAX_MESSAGE_LENGTH} символов.")
+    return text
+
+
+def post_message(
+    *,
+    room_id: int,
+    participant_id: int | None,
+    author_name: str,
+    body: str,
+    is_teacher: bool = False,
+) -> Message:
+    """Сохранить сообщение чата комнаты."""
+    text = clean_message_body(body)
+    return Message.objects.create(
+        room_id=room_id,
+        participant_id=participant_id,
+        author_name=author_name,
+        is_teacher=is_teacher,
+        body=text,
+    )
+
+
+def recent_messages(room: Room, *, limit: int = CHAT_HISTORY_LIMIT, after_id: int | None = None):
+    """Последние (или новые после `after_id`) сообщения комнаты по возрастанию."""
+    queryset = Message.objects.filter(room=room)
+    if after_id is not None:
+        queryset = queryset.filter(pk__gt=after_id).order_by("pk")
+        return list(queryset[:limit])
+    return list(queryset.order_by("-pk")[:limit])[::-1]

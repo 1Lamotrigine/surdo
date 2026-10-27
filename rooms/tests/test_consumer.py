@@ -77,6 +77,35 @@ def make_communicator(join_code: str, cookie: bytes | None = None) -> WebsocketC
     return WebsocketCommunicator(application, f"/ws/rooms/{join_code}/", headers=headers)
 
 
+async def receive_type(
+    client: WebsocketCommunicator,
+    expected: str,
+    *,
+    timeout: float = 1.0,
+    attempts: int = 5,
+) -> dict:
+    """Читать события, пока не придёт ожидаемого типа (пропуская presence и др.)."""
+    for _ in range(attempts):
+        event = await client.receive_json_from(timeout=timeout)
+        if event["type"] == expected:
+            return event
+    raise AssertionError(f"не дождались события {expected!r}")
+
+
+async def connect_guest(client: WebsocketCommunicator, *, timeout: float = 1.0) -> dict:
+    """Подключиться и вернуть первое событие presence.
+
+    При подключении consumer сначала присылает `chat_history`, затем `presence`.
+    """
+    connected, _ = await client.connect()
+    assert connected is True, "соединение должно установиться"
+    first = await client.receive_json_from(timeout=timeout)
+    if first["type"] == "presence":
+        return first
+    assert first["type"] == "chat_history"
+    return await client.receive_json_from(timeout=timeout)
+
+
 @pytest.fixture
 def open_room(owner):
     return Room.objects.create(owner=owner, title="Алгебра", join_code="ABC234")
@@ -87,10 +116,7 @@ def test_guest_with_session_connects_and_gets_presence(websocket_settings, open_
 
     async def scenario() -> None:
         client = make_communicator(open_room.join_code, cookie)
-        connected, _ = await client.connect()
-        assert connected is True
-
-        event = await client.receive_json_from()
+        event = await connect_guest(client)
         assert event["type"] == "presence"
         names = [p["name"] for p in event["participants"]]
         assert "Айгуль" in names
@@ -139,12 +165,10 @@ def test_two_guests_see_each_other(websocket_settings, open_room):
 
     async def scenario() -> None:
         first = make_communicator(open_room.join_code, first_cookie)
-        assert await first.connect() == (True, None)
-        await first.receive_json_from()  # первый получил наличие себя
+        await connect_guest(first)
 
         second = make_communicator(open_room.join_code, second_cookie)
-        assert await second.connect() == (True, None)
-        event = await second.receive_json_from()
+        event = await connect_guest(second)
         names = {p["name"] for p in event["participants"]}
         assert {"Первый", "Второй"} <= names
 
@@ -164,8 +188,7 @@ def test_owner_connects_as_non_guest(websocket_settings, open_room, owner):
 
     async def scenario() -> None:
         client = make_communicator(open_room.join_code, cookie)
-        assert await client.connect() == (True, None)
-        event = await client.receive_json_from()
+        event = await connect_guest(client)
         assert event["type"] == "presence"
         entry = event["participants"][0]
         assert entry["guest"] is False
@@ -180,12 +203,10 @@ def test_presence_removed_after_disconnect(websocket_settings, open_room):
 
     async def scenario() -> None:
         first = make_communicator(open_room.join_code, cookie)
-        assert await first.connect() == (True, None)
-        await first.receive_json_from()
+        await connect_guest(first)
 
         second = make_communicator(open_room.join_code, cookie)
-        assert await second.connect() == (True, None)
-        await second.receive_json_from()
+        await connect_guest(second)
 
         await second.disconnect()
         await first.disconnect()
@@ -201,8 +222,7 @@ def test_ping_gets_pong(websocket_settings, open_room):
 
     async def scenario() -> None:
         client = make_communicator(open_room.join_code, cookie)
-        assert await client.connect() == (True, None)
-        await client.receive_json_from()  # presence
+        await connect_guest(client)
 
         await client.send_json_to({"type": "ping"})
         assert await client.receive_json_from() == {"type": "pong"}
@@ -222,5 +242,110 @@ def test_foreign_room_is_not_reachable(websocket_settings, owner):
         client = make_communicator(room_b.join_code, cookie)
         connected, code = await client.connect()
         assert (connected, code) == (False, 4401)
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_chat_history_sent_on_connect(websocket_settings, open_room):
+    from rooms.models import Message
+
+    Message.objects.create(room=open_room, author_name="Гость", body="старое")
+    cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        connected, _ = await client.connect()
+        assert connected is True
+
+        history = await client.receive_json_from()
+        assert history["type"] == "chat_history"
+        assert [m["body"] for m in history["messages"]] == ["старое"]
+
+        await client.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_guest_message_is_broadcast_to_all(websocket_settings, open_room):
+    first_cookie = make_guest_session_cookie(open_room, "Первый")
+    second_cookie = make_guest_session_cookie(open_room, "Второй")
+
+    async def scenario() -> None:
+        first = make_communicator(open_room.join_code, first_cookie)
+        await connect_guest(first)
+        second = make_communicator(open_room.join_code, second_cookie)
+        await connect_guest(second)
+
+        await first.send_json_to({"type": "chat", "body": "  Привет   всем "})
+
+        event = await receive_type(first, "chat_message")
+        assert event["message"]["body"] == "Привет всем"
+        assert event["message"]["user"] == "Первый"
+        assert event["message"]["is_teacher"] is False
+
+        echo = await receive_type(second, "chat_message")
+        assert echo == event
+
+        await first.disconnect()
+        await second.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_teacher_message_is_marked(websocket_settings, open_room, owner):
+    cookie = make_staff_session_cookie(owner)
+    guest_cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        teacher = make_communicator(open_room.join_code, cookie)
+        await connect_guest(teacher)
+        guest = make_communicator(open_room.join_code, guest_cookie)
+        await connect_guest(guest)
+
+        await teacher.send_json_to({"type": "chat", "body": "Ответ преподавателя"})
+        event = await receive_type(guest, "chat_message")
+
+        assert event["message"]["is_teacher"] is True
+        assert event["message"]["user"] == owner.name
+
+        await teacher.disconnect()
+        await guest.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_empty_message_returns_chat_error(websocket_settings, open_room):
+    cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        await connect_guest(client)
+
+        await client.send_json_to({"type": "chat", "body": "   "})
+        await receive_type(client, "chat_error")
+
+        await client.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_chat_rate_limit(websocket_settings, open_room, settings):
+    settings.CHAT_RATE_LIMIT_MESSAGES = 2
+    settings.CHAT_RATE_LIMIT_WINDOW = 5
+    cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        await connect_guest(client)
+
+        await client.send_json_to({"type": "chat", "body": "раз"})
+        await receive_type(client, "chat_message")
+        await client.send_json_to({"type": "chat", "body": "два"})
+        await receive_type(client, "chat_message")
+        await client.send_json_to({"type": "chat", "body": "три"})
+        blocked = await receive_type(client, "chat_error")
+        assert blocked == {"type": "chat_error", "error": "rate_limited", "retry_after": 5}
+
+        await client.disconnect()
 
     asyncio.run(run_scenario(scenario))
