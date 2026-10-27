@@ -54,6 +54,36 @@ _LATIN_TO_CYRILLIC = {
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 _NUMBER_RE = re.compile(r"^-?\d+$")
 
+# Вводные обороты и слова-заполнители для сжатия без LLM (FR-16). Убираем
+# только явный «мусор» устной речи, а не смысловые слова: «сегодня» и
+# «теперь» могут быть важны для лекции и остаются.
+_FILLER_PHRASES_RE = re.compile(
+    r"(?<!\w)(?:"
+    r"как (?:вы|все) знаете|"
+    r"как известно|"
+    r"на самом деле|"
+    r"в общем(?:-то)?|"
+    r"в принципе|"
+    r"так сказать|"
+    r"если можно|"
+    r"будьте добры|"
+    r"с вашего позволения|"
+    r"обратите внимание|"
+    r"хочу сказать|"
+    r"хотелось бы отметить"
+    r")(?!\w)",
+    re.IGNORECASE,
+)
+_FILLER_WORDS_RE = re.compile(
+    r"(?<!\w)(?:"
+    r"ну|вот|итак|значит|короче|собственно|пожалуйста|ребята|друзья|"
+    r"давайте|вроде|типа|кстати|во-первых|во-вторых|в-третьих|"
+    r"просто"
+    r")(?!\w)",
+    re.IGNORECASE,
+)
+
+
 # Числительные словами: в глоссах число должно быть токеном ``number``, а не
 # дактилем (ТЗ 7.2, пример «странице десять»). Формы даны как в тексте, включая
 # родовые («одна», «две») и падежные варианты тысяч.
@@ -628,6 +658,154 @@ def fallback_glosses(
         "tokens": tokens,
         "unknown": unknown,
     }
+
+
+def compress_response_schema() -> dict:
+    """JSON-схема ответа LLM для сжатия фразы (FR-16)."""
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "CompressedUtterance",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["text"],
+        "properties": {"text": {"type": "string", "minLength": 1}},
+    }
+
+
+def _validate_compress_ratio(target_ratio: float) -> float:
+    if isinstance(target_ratio, bool) or not isinstance(target_ratio, (int, float)):
+        raise GlossValidationError("target_ratio должен быть числом от 0 до 1.")
+    ratio = float(target_ratio)
+    if not 0 < ratio < 1:
+        raise GlossValidationError("target_ratio должен быть больше 0 и меньше 1.")
+    return ratio
+
+
+def _target_length(length: int, target_ratio: float) -> int:
+    return max(1, int(length * target_ratio))
+
+
+def _clean_fillers(text: str) -> str:
+    """Убрать вводные обороты, слова-заполнители и лишние пробелы."""
+    result = _FILLER_PHRASES_RE.sub(" ", text)
+    result = _FILLER_WORDS_RE.sub(" ", result)
+    result = re.sub(r"\s+", " ", result)
+    result = re.sub(r"\s+([,.;:!?])", r"\1", result)
+    result = re.sub(r"([,.;:!?])(?:\s*[,.;:!?])+", r"\1", result)
+    result = result.strip(" ,;:—-")
+    if result:
+        result = result[0].upper() + result[1:]
+    return result
+
+
+def build_compress_prompt(text: str, target_ratio: float) -> str:
+    """Собрать промпт для LLM: сократить фразу до целевой длины."""
+    clean_text = _normalize_text(text)
+    if not clean_text:
+        raise GlossValidationError("Фраза для сжатия не может быть пустой.")
+    ratio = _validate_compress_ratio(target_ratio)
+    target = _target_length(len(clean_text), ratio)
+    schema = json.dumps(compress_response_schema(), ensure_ascii=False, indent=2)
+    return (
+        "Ты сокращаешь фразу преподавателя для перевода на русский жестовый язык.\n"
+        "Убери вводные слова, повторы, обращения, вежливые обороты и пояснения, "
+        "которые не меняют смысл. Сохрани порядок мыслей, числа и ключевые слова. "
+        "Не добавляй новую информацию и не пересказывай другими словами без нужды.\n"
+        f"Целевая длина — не более {target} символов "
+        f"(около {ratio:.0%} исходной фразы).\n"
+        "Верни только JSON-объект с полем text, без markdown и пояснений.\n\n"
+        f"JSON-схема ответа:\n{schema}\n\n"
+        f"Фраза: {json.dumps(clean_text, ensure_ascii=False)}"
+    )
+
+
+def parse_compress_response(raw: str) -> str:
+    """Разобрать ответ LLM: JSON ``{"text": "..."}``, допускается ```-блок."""
+    if not isinstance(raw, str):
+        raise GlossFormatError("Ответ LLM для сжатия должен быть строкой JSON.")
+    stripped = _strip_code_fences(raw).strip()
+    try:
+        payload = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise GlossFormatError("Ответ LLM для сжатия не является JSON.") from exc
+    if not isinstance(payload, dict):
+        raise GlossFormatError("Ожидался JSON-объект с полем text.")
+    result = payload.get("text")
+    if not isinstance(result, str) or not result.strip():
+        raise GlossFormatError("Поле text должно быть непустой строкой.")
+    return result.strip()
+
+
+def _trim_to_target(text: str, target: int) -> str:
+    """Обрезать текст по границе слова, не длиннее ``target`` (если возможно)."""
+    words = text.split()
+    selected: list[str] = []
+    for word in words:
+        candidate = " ".join([*selected, word])
+        if selected and len(candidate) > target:
+            break
+        selected.append(word)
+    trimmed = " ".join(selected).strip(" ,;:—-")
+    return trimmed or (words[0][:target] if words else "")
+
+
+def compress_locally(text: str, target_ratio: float) -> str:
+    """Детерминированное сжатие без LLM: вводные слова и обрезка по цели.
+
+    Используется как резерв, если LLM недоступна, ответила ошибкой или вернула
+    текст не короче исходного. Для фразы из одного короткого слова сжимать
+    нечего — возвращается она же.
+    """
+    clean_text = _normalize_text(text)
+    if not clean_text:
+        raise GlossValidationError("Фраза для сжатия не может быть пустой.")
+    ratio = _validate_compress_ratio(target_ratio)
+    target = _target_length(len(clean_text), ratio)
+
+    reduced = _clean_fillers(clean_text)
+    if not reduced:
+        reduced = clean_text
+    if len(reduced) <= target:
+        return reduced if len(reduced) < len(clean_text) else clean_text
+
+    trimmed = _trim_to_target(reduced, target)
+    return trimmed if 0 < len(trimmed) < len(clean_text) else clean_text
+
+
+def compress(
+    text: str,
+    target_ratio: float,
+    *,
+    provider: LLMProvider | None = None,
+    timeout: float | None = None,
+) -> str:
+    """Сжать длинную фразу (FR-16, ``services.gloss.compress``).
+
+    Сначала пробует LLM с промптом «убери вводные». Если провайдер не настроен,
+    упал или вернул текст не короче исходного, используется детерминированное
+    локальное сжатие. Для непустой длинной фразы результат всегда короче
+    исходной; короткую фразу из одного слова сжать невозможно — она остаётся
+    как есть.
+    """
+    clean_text = _normalize_text(text)
+    if not clean_text:
+        raise GlossValidationError("Фраза для сжатия не может быть пустой.")
+    ratio = _validate_compress_ratio(target_ratio)
+    provider = provider or _default_provider
+
+    if provider is not None:
+        prompt = build_compress_prompt(clean_text, ratio)
+        try:
+            raw = provider.complete(
+                prompt, schema=compress_response_schema(), timeout=timeout
+            )
+            candidate = parse_compress_response(raw)
+        except Exception:  # noqa: BLE001 — сбой LLM не должен ломать управление отставанием
+            candidate = ""
+        if 0 < len(candidate) < len(clean_text):
+            return candidate
+
+    return compress_locally(clean_text, ratio)
 
 
 class GlossCache:
