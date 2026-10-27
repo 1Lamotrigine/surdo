@@ -113,6 +113,11 @@ JOIN_RATE_LIMIT_WINDOW = int(os.environ.get("JOIN_RATE_LIMIT_WINDOW", "60"))
 CHAT_RATE_LIMIT_MESSAGES = int(os.environ.get("CHAT_RATE_LIMIT_MESSAGES", "5"))
 CHAT_RATE_LIMIT_WINDOW = int(os.environ.get("CHAT_RATE_LIMIT_WINDOW", "5"))
 
+# Heartbeat WebSocket: клиент шлёт ping раз в ROOM_PING_INTERVAL секунд,
+# сервер закрывает соединение без ping за ROOM_PING_TIMEOUT секунд (ТЗ 7.6).
+ROOM_PING_INTERVAL = int(os.environ.get("ROOM_PING_INTERVAL", "20"))
+ROOM_PING_TIMEOUT = int(os.environ.get("ROOM_PING_TIMEOUT", "60"))
+
 DATABASES = {
     "default": dj_database_url.parse(
         os.environ.get(

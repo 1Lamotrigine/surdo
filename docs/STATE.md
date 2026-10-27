@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A10 — управление комнатой: готов.**
+**A11 — heartbeat и переподключение: готов.**
 
 ## Что готово
 
@@ -12,7 +12,8 @@
 - Пакет `services` (пока пустой, без Django-моделей).
 - Настройки из переменных окружения: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`,
   `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `MEDIA_ROOT`, `LOG_LEVEL`,
-  `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`.
+  `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
+  `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -68,18 +69,26 @@
   доступа или комната закрыта.
 - **Presence (A8):** участники комнаты в `rooms/presence.py` (кэш Django с TTL),
   учёт нескольких вкладок по счётчику; изменения рассылаются событием `presence`.
-- **Ping/pong (заготовка A11):** `{type: ping}` → `{type: pong}`, продлевает TTL.
+- **Ping/pong (A11):** `{type: ping}` → `{type: pong}`, продлевает TTL presence и
+  heartbeat-окно. Любое сообщение клиента тоже продлевает окно.
+- **Heartbeat (A11):** у каждого соединения фоновая задача; если клиент молчит
+  дольше `ROOM_PING_TIMEOUT` (60 с), сервер закрывает соединение кодом 4408.
+  Проверка идёт раз в `ROOM_PING_INTERVAL` (20 с). Параметры — из окружения.
 - **ASGI:** `AuthMiddlewareStack` кладёт в scope сессию Django и пользователя —
   без этого `connect()` не видит гостевую сессию.
-- **Клиент комнаты (A8/A9):** `frontend/room-live.ts` подключается к WebSocket,
-  рисует участников, историю и чат, шлёт `ping` раз в 20 с, не переподключается
-  на 4401/4403.
+- **Клиент комнаты (A8–A11):** `frontend/room-live.ts` подключается к WebSocket,
+  рисует участников, историю и чат, шлёт `ping` раз в 20 с. Переподключение с
+  нарастающей паузой (1, 2, 4, 8 с, потолок 15 с); на 4401/4403 не
+  переподключается. После переподключения догружает пропущенное через
+  `GET /api/rooms/<code>/history/` и отсекает дубликаты по `id` (и `seq`).
 - **Чат (A9):** модель `rooms.Message` (`room`, `participant`, `author_name`,
   `is_teacher`, `body`, `created_at`). Клиент шлёт `{type: chat, body}`, сервер
   сохраняет и рассылает `chat_message` с `{id, user, body, ts, is_teacher}`.
-- **История (A9):** при подключении consumer присылает `chat_history` (последние
-  50 сообщений); `GET /api/rooms/<code>/history/?after_message_id=<id>` отдаёт
-  пропущенные сообщения для переподключения.
+- **История (A9/A11):** при подключении consumer присылает `chat_history`
+  (последние 50 сообщений); `GET /api/rooms/<code>/history/` принимает
+  `?after_message_id` (чат) и `?after_seq` (фразы) и возвращает
+  `{room, utterances, messages}`. `utterances` пока пуст (фразы — блок E),
+  поле и параметр уже в контракте.
 - **Ограничения чата (A9):** текст нормализуется, максимум 500 символов, rate
   limit `CHAT_RATE_LIMIT_MESSAGES`/`CHAT_RATE_LIMIT_WINDOW` на участника; при
   превышении приходит `chat_error`.
@@ -120,7 +129,7 @@
 | Комната студента | `GET /r/<code>/live/` → `rooms.views.room_student` |
 | WebSocket комнаты | `WS /ws/rooms/<code>/` → `rooms.consumers.RoomConsumer` |
 | Панель преподавателя | `GET /rooms/<code>/live/` → `rooms.views.room_live` |
-| История чата (API) | `GET /api/rooms/<code>/history/` → `rooms.api.chat_history_api` |
+| История для переподключения | `GET /api/rooms/<code>/history/?after_seq=&after_message_id=` → `rooms.api.chat_history_api` |
 | Закрыть комнату | `POST /rooms/<code>/close/` → `rooms.views.room_close` |
 | Сменить ID комнаты | `POST /rooms/<code>/rotate-code/` → `rooms.views.room_rotate_code` |
 | Удалить участника | `POST /rooms/<code>/participants/<id>/remove/` → `rooms.views.room_remove_participant` |
@@ -156,7 +165,8 @@
   вход студента (гостевая сессия, 404/410/429, name-валидация), rate limit, модель
   участника, модель сообщения и сервисные функции чата, `RoomConsumer` (изоляция
   комнат, 4401/4403, presence, ping/pong, чат, история, rate limit,
-  `room_closed`/`participant_removed`).
+  `room_closed`/`participant_removed`, heartbeat: ping продлевает окно,
+  молчащий клиент закрывается кодом 4408).
 - `rooms/tests/test_management.py` — сервисные функции и HTTP-действия A10:
   смена ID (включая повтор при коллизии и недействительность старого кода),
   закрытие (идемпотентность, очистка presence), удаление участника (presence,
@@ -203,9 +213,17 @@
   TTL, а не в отдельном Redis-множестве: так одна абстракция работает и с Redis, и
   с локальным кэшем. Участник онлайн, пока у него есть хотя бы одна вкладка
   (`count > 0`).
-- `RoomConsumer` умеет `ping`/`pong`, `chat`, рассылку `presence`/`chat_message`
-  и закрытие по `room_closed`/`participant_removed`. События фраз (`asr_text`,
-  `utterance`) появятся в блоке E, heartbeat — A11.
+- `RoomConsumer` умеет `ping`/`pong`, `chat`, рассылку `presence`/`chat_message`,
+  закрытие по `room_closed`/`participant_removed` и heartbeat (закрытие 4408).
+  События фраз (`asr_text`, `utterance`) появятся в блоке E.
+- Heartbeat реализован фоневой задачей на соединение (не отдельным таймером в
+  Redis): `last_seen` обновляется на `connect` и на любом входящем сообщении,
+  задача раз в `ROOM_PING_INTERVAL` сравнивает его с `ROOM_PING_TIMEOUT` и
+  закрывает соединение кодом 4408. Задача отменяется в `disconnect`. Так работает
+  и с in-memory layer, и с Redis.
+- Клиент при переподключении сначала получает `chat_history` (последние 50), а
+  затем догружает пропущенное через API; дубликаты отсекаются по `lastMessageId`
+  (и `lastSeq` для будущих фраз), поэтому двойной источник не даёт повторов.
 - Смена ID не меняет `room.id`, поэтому группа Channels остаётся прежней: старый
   код и QR перестают находить комнату (поиск идёт среди открытых), а уже
   подключённые вкладки живут до переподключения. Событие `room_closed` при этом
@@ -223,21 +241,22 @@
 - История отдаётся по возрастанию id: при подключении — последние 50, через
   `?after_message_id` — только новые; клиент отсекает дубликаты по id.
 
-## Проверка A10
+## Проверка A11
 
 ```bash
-make check          # ruff + tsc + vite build + 134 теста — зелёный
+make check          # ruff + tsc + vite build + 140 тестов — зелёный
 ```
 
-Критерий этапа выполнен: после смены ID старый код даёт 404, а старый QR ведёт
-на него же; после закрытия комнаты участники получают `room_closed` и соединение
-закрывается (4403), новые входы запрещены (410); удалённый участник отключается
-(4403), не может переподключиться и пропадает из presence у остальных.
+Критерий этапа (в объёме блока A): клиент шлёт `ping` раз в 20 с, и пока он это
+делает, соединение живёт; клиент, замолчавший дольше 60 с, получает закрытие
+4408. Клиент переподключается с паузой 1, 2, 4, 8…15 с, после подключения
+догружает пропущенные сообщения через `GET /api/rooms/<code>/history/` и
+отсекает дубликаты по `id`. Фразовая часть (`after_seq`, `utterances`) уже в
+контракте, но наполняется в блоке E — сейчас всегда пустой список.
 
 ## Дальше
 
-**A11 — heartbeat и переподключение:** ping/pong (заготовка уже есть), повтор с
-нарастающей паузой, endpoint истории `GET /api/rooms/<code>/history/`
-(`?after_seq`/`?after_message_id`), отсечение дубликатов по seq и id.
-Критерий: после обрыва клиент получает пропущенные фразы и сообщения без повторов.
-Читать: `docs/spec/ws-events.md` (раздел 7.6), `docs/spec/api.md`.
+**Блок A закрыт.** Следующий — **B1**: модели `Sign`, `SignClip`, `UnknownWord`,
+`DictionaryVersion`, `Utterance` и миграции. Именно `Utterance` с полем `seq`
+наполнит `after_seq` в истории (A11) и события `asr_text`/`utterance` (блок E).
+Читать: `docs/spec/db-schema.md`, `docs/spec/dictionary-process.md`.

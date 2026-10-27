@@ -1,16 +1,21 @@
-"""WebSocket-consumer комнаты: изоляция, presence и чат.
+"""WebSocket-consumer комнаты: изоляция, presence, чат и heartbeat.
 
 A8: проверка кода и сессии в `connect()`, группа `room_<id>`, presence.
 A9: чат — приём `{type: chat, body}`, рассылка `chat_message`, догрузка истории
 при подключении.
 A10: `room_closed` закрывает соединения, `participant_removed` закрывает
-соединения удалённого участника. Heartbeat — A11.
+соединения удалённого участника.
+A11: heartbeat — клиент шлёт `ping`, сервер закрывает соединение без пинга за
+`ROOM_PING_TIMEOUT` секунд.
 """
 
+import asyncio
 import logging
+from time import monotonic
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from django.conf import settings
 
 from rooms import presence
 from rooms.consumers_support import resolve_connection
@@ -23,6 +28,7 @@ logger = logging.getLogger(__name__)
 CLOSE_NO_SESSION = 4401
 CLOSE_NO_ACCESS = 4403
 CLOSE_RATE_LIMITED = 4429
+CLOSE_HEARTBEAT_TIMEOUT = 4408
 
 
 def group_name_for(room_id: int) -> str:
@@ -39,6 +45,8 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
     display_name: str
     is_guest: bool
     is_teacher: bool
+    last_seen: float
+    heartbeat_task: asyncio.Task | None
 
     async def connect(self) -> None:
         join_code = self.scope["url_route"]["kwargs"].get("join_code", "")
@@ -62,6 +70,8 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
         self.display_name = identity.name
         self.is_guest = identity.guest
         self.is_teacher = identity.is_teacher
+        self.last_seen = monotonic()
+        self.heartbeat_task = None
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
@@ -84,18 +94,43 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
         )
         await self._broadcast_presence(participants)
 
+        self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
     async def disconnect(self, code: int) -> None:
         if not hasattr(self, "group_name"):
             return
+        if self.heartbeat_task is not None:
+            self.heartbeat_task.cancel()
+            self.heartbeat_task = None
         participants = await database_sync_to_async(presence.remove_connection)(
             self.room_id, self.connection_key
         )
         await self._broadcast_presence(participants)
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
+    async def _heartbeat_loop(self) -> None:
+        """Закрыть соединение, если клиент молчит дольше `ROOM_PING_TIMEOUT`."""
+        timeout = settings.ROOM_PING_TIMEOUT
+        interval = max(settings.ROOM_PING_INTERVAL, 1)
+        while True:
+            await asyncio.sleep(interval)
+            if monotonic() - self.last_seen > timeout:
+                logger.info(
+                    "heartbeat timeout: room=%s key=%s",
+                    self.room_id,
+                    self.connection_key,
+                )
+                # Задачу закрываем сами, чтобы disconnect не отменял её повторно.
+                self.heartbeat_task = None
+                await self.close(code=CLOSE_HEARTBEAT_TIMEOUT)
+                return
+
     async def receive_json(self, content, **kwargs) -> None:
         if not isinstance(content, dict):
             return
+
+        # Любое сообщение клиента продлевает heartbeat-окно.
+        self.last_seen = monotonic()
 
         message_type = content.get("type")
         if message_type == "ping":

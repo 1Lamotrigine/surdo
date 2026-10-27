@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from rooms.models import Room
-from rooms.services import JoinCodeGenerationError, create_room
+from rooms.services import JoinCodeGenerationError, create_room, recent_utterances
 
 pytestmark = pytest.mark.django_db
 
@@ -51,3 +51,11 @@ def test_open_rooms_have_unique_codes(owner):
     codes = {create_room(owner=owner).join_code for _ in range(30)}
 
     assert len(codes) == 30
+
+
+def test_recent_utterances_is_empty_until_block_e(owner):
+    """Фразы появятся на B1/E1; пока endpoint отдаёт пустой список."""
+    room = Room.objects.create(owner=owner)
+
+    assert recent_utterances(room) == []
+    assert recent_utterances(room, after_seq=3) == []

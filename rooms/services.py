@@ -164,3 +164,13 @@ def recent_messages(room: Room, *, limit: int = CHAT_HISTORY_LIMIT, after_id: in
         queryset = queryset.filter(pk__gt=after_id).order_by("pk")
         return list(queryset[:limit])
     return list(queryset.order_by("-pk")[:limit])[::-1]
+
+
+def recent_utterances(room: Room, *, after_seq: int | None = None) -> list:
+    """Пропущенные фразы для переподключения (заглушка до блока E).
+
+    Модель `Utterance` и порядковый номер `seq` появятся на этапе B1/E1.
+    Контракт endpoint уже включает `after_seq` и поле `utterances`, поэтому
+    клиент и API не будут меняться, когда фразы появятся.
+    """
+    return []

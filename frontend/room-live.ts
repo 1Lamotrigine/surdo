@@ -1,6 +1,7 @@
 /**
- * Живой клиент комнаты (A8+A9): одно WebSocket-соединение на страницу.
- * Обрабатывает presence, историю и чат; ping раз в 20 с.
+ * Живой клиент комнаты (A8–A11): одно WebSocket-соединение на страницу.
+ * Presence, история и чат; ping раз в 20 с (heartbeat), переподключение с
+ * нарастающей паузой (1, 2, 4, 8 с, потолок 15 с) и догрузка пропущенного.
  */
 
 type PresenceEntry = {
@@ -28,7 +29,10 @@ type ServerEvent =
   | { type: "participant_removed" }
   | { type: string; [key: string]: unknown };
 
+// Heartbeat и переподключение (ТЗ 7.6): ping раз в 20 с, пауза 1,2,4,8…15 с.
 const PING_INTERVAL_MS = 20_000;
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 15_000;
 const NON_RETRYABLE_CODES = new Set([4401, 4403]);
 
 function isEvent<T extends ServerEvent["type"]>(
@@ -65,6 +69,8 @@ export function setupRoomLive(root: HTMLElement): void {
   let pingTimer: number | undefined;
   let socket: WebSocket | undefined;
   let lastMessageId = 0;
+  let lastSeq = 0;
+  let reconnectAttempt = 0;
   let closed = false;
 
   const setStatus = (text: string, state: "loading" | "ready" | "error"): void => {
@@ -144,12 +150,38 @@ export function setupRoomLive(root: HTMLElement): void {
     for (const message of messages) appendMessage(message);
   };
 
+  /** Догрузить пропущенное после обрыва; дубликаты отсекаются по id и seq. */
+  const fetchMissed = async (): Promise<void> => {
+    const params = new URLSearchParams();
+    if (lastSeq > 0) params.set("after_seq", String(lastSeq));
+    if (lastMessageId > 0) params.set("after_message_id", String(lastMessageId));
+    const url = `/api/rooms/${joinCode}/history/?${params.toString()}`;
+
+    try {
+      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        messages?: ChatMessage[];
+        utterances?: { seq: number }[];
+      };
+      for (const message of data.messages ?? []) appendMessage(message);
+      for (const utterance of data.utterances ?? []) {
+        if (utterance.seq > lastSeq) lastSeq = utterance.seq;
+      }
+    } catch {
+      // Не критично: следующее переподключение попробует снова.
+    }
+  };
+
   const connect = (): void => {
     setStatus("Подключение…", "loading");
     socket = new WebSocket(roomSocketUrl(joinCode));
 
     socket.addEventListener("open", () => {
       setStatus("На связи", "ready");
+      const reconnected = reconnectAttempt > 0;
+      reconnectAttempt = 0;
+      if (reconnected) void fetchMissed();
       pingTimer = window.setInterval(() => {
         if (socket?.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ type: "ping" }));
@@ -190,8 +222,10 @@ export function setupRoomLive(root: HTMLElement): void {
         setStatus(closed ? status?.textContent ?? "Комната недоступна" : "Нет доступа к комнате", "error");
         return;
       }
-      setStatus("Соединение потеряно, переподключение…", "loading");
-      window.setTimeout(connect, 2_000);
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempt, RECONNECT_MAX_MS);
+      reconnectAttempt += 1;
+      setStatus(`Соединение потеряно, переподключение через ${Math.round(delay / 1000)} с…`, "loading");
+      window.setTimeout(connect, delay);
     });
 
     socket.addEventListener("error", () => {

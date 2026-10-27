@@ -232,6 +232,50 @@ def test_ping_gets_pong(websocket_settings, open_room):
     asyncio.run(run_scenario(scenario))
 
 
+def test_ping_extends_heartbeat_and_keeps_connection(websocket_settings, open_room, settings):
+    """Пока клиент шлёт ping, сервер не закрывает соединение."""
+    settings.ROOM_PING_INTERVAL = 1
+    settings.ROOM_PING_TIMEOUT = 2
+    cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        await connect_guest(client)
+
+        for _ in range(3):
+            await asyncio.sleep(1.1)
+            await client.send_json_to({"type": "ping"})
+            assert await client.receive_json_from(timeout=1.0) == {"type": "pong"}
+
+        # Соединение всё ещё живо: сервер не прислал закрытие.
+        await client.send_json_to({"type": "ping"})
+        assert await client.receive_json_from(timeout=1.0) == {"type": "pong"}
+
+        await client.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_silent_client_is_closed_by_heartbeat(websocket_settings, open_room, settings):
+    """Клиент без ping дольше таймаута получает закрытие 4408."""
+    settings.ROOM_PING_INTERVAL = 1
+    settings.ROOM_PING_TIMEOUT = 1
+    cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        client = make_communicator(open_room.join_code, cookie)
+        await connect_guest(client)
+
+        # Ждём тишины: loop проверяет таймаут раз в интервал (1 с).
+        await asyncio.sleep(2.5)
+
+        output = await client.receive_output(timeout=2.0)
+        assert output["type"] == "websocket.close"
+        assert output["code"] == 4408
+
+    asyncio.run(run_scenario(scenario))
+
+
 def test_foreign_room_is_not_reachable(websocket_settings, owner):
     """Гость одной комнаты не проходит в другую."""
     room_a = Room.objects.create(owner=owner, join_code="ROOMAA")

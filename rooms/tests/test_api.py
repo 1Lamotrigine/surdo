@@ -105,6 +105,33 @@ def test_history_after_message_id(client, owner):
     assert [m["body"] for m in response.json()["messages"]] == ["два"]
 
 
+def test_history_includes_reserved_utterances_field(client, owner):
+    room = Room.objects.create(owner=owner, join_code="HIST05")
+    client.force_login(owner)
+
+    response = client.get(reverse("api-room-history", kwargs={"join_code": room.join_code}))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["room"] == room.join_code
+    assert data["utterances"] == []
+    assert data["messages"] == []
+
+
+def test_history_accepts_after_seq(client, owner):
+    """`after_seq` уже в контракте; фразы появятся в блоке E."""
+    room = Room.objects.create(owner=owner, join_code="HIST06")
+    client.force_login(owner)
+
+    response = client.get(
+        reverse("api-room-history", kwargs={"join_code": room.join_code}),
+        {"after_seq": 5, "after_message_id": 0},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["utterances"] == []
+
+
 def test_history_available_to_guest_with_session(client, owner):
     from rooms.models import Message
     from rooms.services import GUEST_ROOMS_SESSION_KEY

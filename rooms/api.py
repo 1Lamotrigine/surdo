@@ -10,7 +10,7 @@ from rooms.forms import RoomForm
 from rooms.models import Room
 from rooms.permissions import can_create_room, is_room_member
 from rooms.qr import build_join_url
-from rooms.services import create_room, find_open_room, recent_messages
+from rooms.services import create_room, find_open_room, recent_messages, recent_utterances
 
 
 @require_POST
@@ -58,10 +58,14 @@ def _parse_int(value, *, default=None):
 
 @require_GET
 def chat_history_api(request: HttpRequest, join_code: str) -> JsonResponse:
-    """Пропущенные сообщения чата для переподключения.
+    """Пропущенное для переподключения: фразы и сообщения чата.
 
-    `?after_message_id=<id>` возвращает только новые сообщения; без него —
-    последние (до 50). Доступ только у участников комнаты.
+    Параметры (ТЗ 7.6): `?after_seq=<n>` — фразы после порядкового номера,
+    `?after_message_id=<m>` — сообщения чата после id. Без параметров отдаём
+    последние сообщения (до 50). Доступ только у участников комнаты.
+
+    Фразы (`seq`, глоссы) появятся в блоке E; пока `utterances` всегда пуст,
+    но поле и параметр `after_seq` уже в контракте, чтобы клиент не менялся.
     """
     room = find_open_room(join_code) or get_object_or_404(
         Room, join_code__iexact=join_code, status=Room.Status.CLOSED
@@ -69,11 +73,14 @@ def chat_history_api(request: HttpRequest, join_code: str) -> JsonResponse:
     if not is_room_member(request, room):
         return JsonResponse({"detail": "Нет доступа к этой комнате."}, status=403)
 
-    after_id = _parse_int(request.GET.get("after_message_id"))
-    messages = recent_messages(room, after_id=after_id)
+    after_message_id = _parse_int(request.GET.get("after_message_id"))
+    after_seq = _parse_int(request.GET.get("after_seq"))
+    messages = recent_messages(room, after_id=after_message_id)
+    utterances = recent_utterances(room, after_seq=after_seq)
     return JsonResponse(
         {
             "room": room.join_code,
+            "utterances": [utterance.as_event() for utterance in utterances],
             "messages": [message.as_event() for message in messages],
         }
     )

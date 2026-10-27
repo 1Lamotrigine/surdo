@@ -77,6 +77,13 @@ app/
   сообщений). Текст нормализуется и ограничен 500 символами; есть rate limit
   (`CHAT_RATE_LIMIT_MESSAGES`/`CHAT_RATE_LIMIT_WINDOW`). Границы этапов: чат — A9,
   управление комнатой — A10, heartbeat — A11.
+- Heartbeat (A11): клиент шлёт `ping` раз в `ROOM_PING_INTERVAL` (20 с), сервер
+  закрывает соединение без пинга за `ROOM_PING_TIMEOUT` (60 с) кодом 4408.
+  Реализация — фоновая задача на соединение (`_heartbeat_loop`), не таймер Redis.
+  Клиент переподключается с паузой 1, 2, 4, 8…15 с и после подключения
+  догружает пропущенное через `GET /api/rooms/<code>/history/`
+  (`?after_seq`/`?after_message_id`), отсекая дубликаты по `id` и `seq`.
+  Фразовая часть (`utterances`, `seq`) появится в блоке E — сейчас пустой список.
 - Управление комнатой (A10): сервис `rooms/management.py` (`close_room`,
   `rotate_join_code`, `remove_participant`) рассылает `room_closed` /
   `participant_removed` в группу `room_<id>` и закрывает соединения кодом 4403.
