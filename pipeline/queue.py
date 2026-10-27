@@ -34,15 +34,18 @@ from django.db import connections
 from django.utils import timezone
 
 from pipeline.events import broadcast_asr_text, broadcast_utterance
-from pipeline.gloss_engine import compute_glosses_async
+from pipeline.gloss_engine import compute_glosses_async, get_llm_provider
+from pipeline.lag_policy import lag_playback_policy, should_compress
 from pipeline.models import Utterance
 from pipeline.services import (
     UtteranceValidationError,
     create_utterance,
+    latest_display_lag_ms,
     normalize_text,
     sign_language_for_utterance,
 )
 from services.asr import transcribe_async
+from services.gloss import compress
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +111,42 @@ def _prepare_audio_job(job: AudioJob):
     )
 
 
+async def _compress_for_policy_async(text: str, policy) -> tuple[str, bool]:
+    """Сжать фразу для догона, не блокируя цикл очереди.
+
+    ``services.gloss.compress`` сначала пробует LLM, затем локальный резерв F3,
+    поэтому отсутствие провайдера не мешает догону. Жёсткий таймаут страхует
+    конвейер от зависшей модели: тогда показываем исходный текст, но скорость и
+    пропуск пауз из политики всё равно применяются.
+    """
+    if not should_compress(policy, text) or policy.target_ratio is None:
+        return text, False
+
+    timeout = max(0.001, float(getattr(settings, "COMPRESS_TIMEOUT", 4.0)))
+    try:
+        candidate = await asyncio.wait_for(
+            asyncio.to_thread(
+                compress,
+                text,
+                policy.target_ratio,
+                provider=get_llm_provider(),
+                timeout=timeout,
+            ),
+            timeout,
+        )
+        candidate = normalize_text(candidate)
+    except TimeoutError:
+        logger.warning("phrase compression timeout: %.3fs", timeout)
+        return text, False
+    except Exception:  # noqa: BLE001 — сжатие не должно ронять показ фразы
+        logger.exception("phrase compression failed")
+        return text, False
+
+    if 0 < len(candidate) < len(text):
+        return candidate, True
+    return text, False
+
+
 async def _finish_phrase_async(
     room,
     clean_text: str,
@@ -120,6 +159,15 @@ async def _finish_phrase_async(
     """Общий путь текстовой и аудиофразы: субтитры, глоссы, сохранение."""
     if broadcast_text:
         broadcast_asr_text(room.pk, clean_text)
+
+    # F8: пока новая фраза обрабатывается, фактическое отставание ещё
+    # неизвестно. Берём последнее показанное и заранее решаем, ускорять ли
+    # показ и сжимать ли текст. Сжатие идёт до глосс, чтобы клипы и субтитры
+    # соответствовали уже сокращённой фразе.
+    lag_ms = await database_sync_to_async(latest_display_lag_ms)(room.pk)
+    policy = lag_playback_policy(lag_ms)
+    clean_text, compressed = await _compress_for_policy_async(clean_text, policy)
+
     outcome = await compute_glosses_async(clean_text, sign_lang)
     utterance = await database_sync_to_async(create_utterance)(
         room,
@@ -130,6 +178,7 @@ async def _finish_phrase_async(
         glosses=outcome.glosses,
         gloss_ms=outcome.elapsed_ms,
         degraded=outcome.degraded,
+        playback=policy.as_event(compressed=compressed),
     )
     # Сборка клипов и рассылка обращаются к БД, поэтому тоже уходят из loop.
     await database_sync_to_async(broadcast_utterance)(utterance)

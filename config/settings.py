@@ -144,6 +144,11 @@ LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
 LLM_API_URL = os.environ.get("LLM_API_URL", "").strip()
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT") or "8")
 
+# Сжатие фразы при отставании (FR-16): жёсткий предел ожидания LLM. Если модель
+# не ответила вовремя, работает детерминированное локальное сжатие F3, поэтому
+# конвейер не задерживается.
+COMPRESS_TIMEOUT = float(os.environ.get("COMPRESS_TIMEOUT") or "4")
+
 # Загрузка клипа жеста (формат — docs/spec/clip-format.md). Ограничения
 # защищают хранилище от битых и слишком больших файлов.
 CLIP_VERSION = int(os.environ.get("CLIP_VERSION", "1"))

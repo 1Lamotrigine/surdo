@@ -26,6 +26,7 @@ class Utterance(models.Model):
     asr_ms = models.PositiveIntegerField("распознавание, мс", null=True, blank=True)
     gloss_ms = models.PositiveIntegerField("глоссы, мс", null=True, blank=True)
     display_lag_ms = models.PositiveIntegerField("отставание, мс", null=True, blank=True)
+    playback = models.JSONField("параметры догона", default=dict, blank=True)
     degraded = models.BooleanField("только субтитры", default=False)
     started_at = models.DateTimeField("начата")
     created_at = models.DateTimeField("создана", auto_now_add=True)
@@ -56,5 +57,6 @@ class Utterance(models.Model):
             "glosses": self.glosses,
             "degraded": self.degraded,
             "display_lag_ms": self.display_lag_ms,
+            "playback": self.playback or {},
             "ts": self.started_at.isoformat(),
         }

@@ -17,6 +17,7 @@ import {
   type NotificationKind,
 } from "./notifications";
 import type { UtteranceEvent } from "./room-clips";
+import type { PlaybackPolicy } from "./lag-policy";
 
 type PresenceEntry = {
   name: string;
@@ -41,6 +42,14 @@ type ServerEvent =
   | { type: "asr_text"; text: string }
   | { type: "utterance"; utterance: UtteranceEvent }
   | { type: "lag_status"; lag_ms: number; level: string }
+  | {
+      type: "playback";
+      utterance_id?: number;
+      lag_ms: number;
+      level: string;
+      speed: number | null;
+      gap_ms: number;
+    }
   | { type: "unknown_words"; words: string[] }
   | { type: "pong" }
   | { type: "room_closed" }
@@ -114,6 +123,7 @@ export function setupRoomLive(root: HTMLElement): void {
 
   type PhraseController = {
     enqueue(utterance: UtteranceEvent): boolean;
+    setPlaybackPolicy?(policy: PlaybackPolicy): void;
     dispose(): void;
   };
   let phrasePlayer: Promise<PhraseController> | null = null;
@@ -413,6 +423,10 @@ export function setupRoomLive(root: HTMLElement): void {
         }
       } else if (isEvent(payload, "lag_status")) {
         renderLagStatus(payload.lag_ms, payload.level);
+      } else if (isEvent(payload, "playback")) {
+        getPhrasePlayer()
+          ?.then((player) => player.setPlaybackPolicy?.(payload))
+          .catch(() => undefined);
       } else if (isEvent(payload, "unknown_words")) {
         if (isTeacherView) renderUnknownWords(payload.words);
       } else if (isEvent(payload, "chat_error") && chatHint) {

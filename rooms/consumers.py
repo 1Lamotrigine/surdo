@@ -17,6 +17,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
 
+from pipeline.lag_policy import lag_playback_policy
 from pipeline.services import record_display_started
 from rooms import presence
 from rooms.consumers_support import resolve_connection
@@ -143,11 +144,12 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_display_started(content)
 
     async def _handle_display_started(self, content: dict) -> None:
-        """E4: студент сообщил фактическое начало показа фразы.
+        """E4/F8: студент сообщил фактическое начало показа фразы.
 
-        Метрика сохраняется у ``Utterance``, а уровень отставания уходит в
-        группу. Consumer преподавателя отдаёт его в браузер, студенческие
-        соединения событие молча игнорируют.
+        Метрика сохраняется у ``Utterance``, уровень отставания уходит
+        преподавателю, а политика догона — студентам. Студент может ускорить
+        текущую фразу и убрать паузы на ходу; сжатие следующей фразы сервер
+        применит при её обработке.
         """
         utterance_id = content.get("utterance_id")
         if (
@@ -167,6 +169,15 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_send(
             self.group_name,
             {"type": "lag.status", **lag.as_event()},
+        )
+        policy = lag_playback_policy(lag.lag_ms)
+        await self.channel_layer.group_send(
+            self.group_name,
+            {
+                "type": "playback",
+                "utterance_id": utterance_id,
+                **policy.as_event(),
+            },
         )
 
     async def _handle_chat(self, body: str) -> None:
@@ -239,6 +250,25 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
                 "type": "lag_status",
                 "lag_ms": event.get("lag_ms", 0),
                 "level": event.get("level", "green"),
+            }
+        )
+
+    async def playback(self, event: dict) -> None:
+        """F8: параметры догона получает только студент.
+
+        Преподавателю они не нужны: его индикатор — ``lag_status``. Студент по
+        этому событию меняет скорость и паузы уже играющей фразы.
+        """
+        if getattr(self, "is_teacher", False):
+            return
+        await self.send_json(
+            {
+                "type": "playback",
+                "utterance_id": event.get("utterance_id"),
+                "level": event.get("level", "green"),
+                "lag_ms": event.get("lag_ms", 0),
+                "speed": event.get("speed"),
+                "gap_ms": event.get("gap_ms", 0),
             }
         )
 

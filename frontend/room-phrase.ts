@@ -8,6 +8,14 @@ import { Avatar, type AvatarStatus } from "./avatar";
 import { decodeClip } from "./clip";
 import { ClipPlayer } from "./clip-player";
 import {
+  DEFAULT_PLAYBACK_POLICY,
+  effectivePlaybackSpeed,
+  normalizePlaybackPolicy,
+  playbackGapMs,
+  type NormalizedPlaybackPolicy,
+  type PlaybackPolicy,
+} from "./lag-policy";
+import {
   PhraseQueue,
   fetchClipBytes,
   loadClipQueue,
@@ -43,14 +51,15 @@ export class RoomPhrasePlayer {
   private readonly avatar: Avatar | null;
   private readonly ready: Promise<void>;
   private readonly queue: PhraseQueue<UtteranceEvent>;
-  private readonly speed: number;
+  private readonly baseSpeed: number;
   private readonly onDisplayStarted?: (utterance: UtteranceEvent) => void;
+  private playbackPolicy: NormalizedPlaybackPolicy = DEFAULT_PLAYBACK_POLICY;
   private player: ClipPlayer | null = null;
   private activeResolve: (() => void) | null = null;
   private disposed = false;
 
   constructor(root: HTMLElement, options: RoomPhraseOptions = {}) {
-    this.speed = Math.min(1.3, Math.max(0.6, options.speed ?? 1));
+    this.baseSpeed = Math.min(1.3, Math.max(0.6, options.speed ?? 1));
     this.onDisplayStarted = options.onDisplayStarted;
     this.status = root.querySelector<HTMLElement>("[data-room-phrase-status]");
 
@@ -98,6 +107,22 @@ export class RoomPhrasePlayer {
   /** Поставить фразу в очередь; повторы по `seq` отбрасываются. */
   enqueue(utterance: UtteranceEvent): boolean {
     return this.queue.enqueue(utterance);
+  }
+
+  /**
+   * Применить политику догона к текущей и следующим фразам (F8).
+   *
+   * Событие `playback` приходит после `display_started`, когда фраза уже
+   * играет: скорость и паузу меняем на ходу, не начиная очередь заново.
+   * Сжатие уже показанного текста невозможно, но следующая фраза будет
+   * обработана сервером с учётом нового отставания.
+   */
+  setPlaybackPolicy(policy: PlaybackPolicy): void {
+    const normalized = normalizePlaybackPolicy(policy);
+    this.playbackPolicy = normalized;
+    const speed = effectivePlaybackSpeed(this.baseSpeed, normalized);
+    this.player?.setSpeed(speed);
+    this.player?.setGapMs(playbackGapMs(normalized));
   }
 
   /** Дождаться конца очереди (диагностика и тесты). */
@@ -150,6 +175,10 @@ export class RoomPhrasePlayer {
   private async play(utterance: UtteranceEvent): Promise<void> {
     if (this.disposed) return;
 
+    this.playbackPolicy = normalizePlaybackPolicy(
+      utterance.playback ?? this.playbackPolicy,
+    );
+
     // Текст и слова появляются сразу; клипы и аватар могут догружаться.
     // С этого момента фраза считается показанной: очередь уже доиграла
     // предыдущие фразы, поэтому задержка отражает реальное отставание (E4).
@@ -183,6 +212,7 @@ export class RoomPhrasePlayer {
     loaded: LoadedClip[],
   ): Promise<void> {
     const clips = loaded.map((item) => item.clip);
+    const policy = this.playbackPolicy;
     await new Promise<void>((resolve) => {
       let settled = false;
       const done = (): void => {
@@ -196,7 +226,8 @@ export class RoomPhrasePlayer {
       this.activeResolve = done;
 
       const player = new ClipPlayer(vrm, {
-        speed: this.speed,
+        speed: effectivePlaybackSpeed(this.baseSpeed, policy),
+        gapMs: playbackGapMs(policy),
         mode: "phrase",
         onClip: (index) => {
           this.subtitles.highlight(loaded[index]?.wordIndex ?? -1);
@@ -217,11 +248,12 @@ export class RoomPhrasePlayer {
       await delay(1500);
       return;
     }
+    const speed = effectivePlaybackSpeed(this.baseSpeed, this.playbackPolicy);
     for (const item of loaded) {
       if (this.disposed) return;
       this.subtitles.highlight(item.wordIndex);
       const seconds = item.clip.frames / Math.max(item.clip.fps, 1);
-      await delay(Math.max(200, (seconds * 1000) / this.speed));
+      await delay(Math.max(200, (seconds * 1000) / speed));
     }
     this.subtitles.highlight(-1);
   }

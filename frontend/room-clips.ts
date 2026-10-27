@@ -8,6 +8,7 @@
  */
 
 import { decodeClip, type DecodedClip } from "./clip";
+import type { PlaybackPolicy } from "./lag-policy";
 import { alignTokens, wordIndexForToken, type UtteranceGlosses } from "./subtitles";
 
 /** Вид клипа: жест, число или буква дактиля. */
@@ -33,6 +34,8 @@ export type UtteranceEvent = {
   text: string;
   glosses: UtteranceGlosses;
   degraded: boolean;
+  /** F8: скорость, паузы и признак сжатия, посчитанные сервером. */
+  playback?: PlaybackPolicy;
   ts: string;
   clips?: UtteranceClipRef[];
 };

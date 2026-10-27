@@ -497,7 +497,7 @@ def test_chat_rate_limit(websocket_settings, open_room, settings):
     asyncio.run(run_scenario(scenario))
 
 
-def test_display_started_updates_lag_and_notifies_teacher_only(
+def test_display_started_updates_lag_notifies_teacher_and_sends_playback(
     websocket_settings, open_room, owner
 ):
     teacher_cookie = make_staff_session_cookie(owner)
@@ -525,7 +525,14 @@ def test_display_started_updates_lag_and_notifies_teacher_only(
         assert event["level"] == "red"
         assert 11_000 <= event["lag_ms"] < 20_000
 
-        # Студент событие не получает: следующим ответом на ping должен быть pong.
+        # F8: студент получает политику догона для уже играющей фразы.
+        playback = await receive_type(student, "playback")
+        assert playback["utterance_id"] == utterance.pk
+        assert playback["level"] == "red"
+        assert playback["speed"] == 1.3
+        assert playback["gap_ms"] == 0
+
+        # Следующим ответом на ping должен быть pong: других событий нет.
         await student.send_json_to({"type": "ping"})
         assert await student.receive_json_from(timeout=1.0) == {"type": "pong"}
 

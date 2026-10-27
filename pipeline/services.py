@@ -129,6 +129,21 @@ def record_display_started(
     return LagStatus(lag_ms=utterance.display_lag_ms, level=lag_level(utterance.display_lag_ms))
 
 
+def latest_display_lag_ms(room_id: int) -> int | None:
+    """Последнее известное отставание комнаты (для политики F8).
+
+    Пока новая фраза обрабатывается, фактическое отставание ещё неизвестно:
+    студент сообщит его только после начала показа. Поэтому берём метрику
+    последней показанной фразы комнаты; если такой ещё нет — ``None``.
+    """
+    return (
+        Utterance.objects.filter(room_id=room_id, display_lag_ms__isnull=False)
+        .order_by("-seq")
+        .values_list("display_lag_ms", flat=True)
+        .first()
+    )
+
+
 def normalize_text(text: str) -> str:
     """Схлопнуть пробелы и проверить, что фраза не пустая."""
     cleaned = " ".join((text or "").split())
@@ -191,6 +206,7 @@ def create_utterance(
     glosses: dict | None = None,
     gloss_ms: int | None = None,
     degraded: bool = False,
+    playback: dict | None = None,
 ) -> Utterance:
     """Сохранить фразу и отметить незнакомые слова.
 
@@ -207,11 +223,15 @@ def create_utterance(
 
     ``asr_ms`` заполняется, когда текст пришёл из распознавания речи (E2);
     ``gloss_ms`` измеряется здесь для E1. ``display_lag_ms`` заполняет consumer,
-    когда студент присылает ``display_started`` (E4).
+    когда студент присылает ``display_started`` (E4). ``playback`` — политика
+    догона F8, вычисленная по предыдущему отставанию и сохранённая вместе с
+    фразой, чтобы история и переподключение показывали её теми же параметрами.
     """
     started_at = started_at or timezone.now()
     clean_text = normalize_text(text)
     sign_lang = _clean_lang(lang, room)
+    if playback is not None and not isinstance(playback, dict):
+        raise UtteranceValidationError("Параметры показа должны быть объектом.")
 
     if glosses is None:
         started = perf_counter()
@@ -246,6 +266,7 @@ def create_utterance(
             asr_ms=asr_ms,
             gloss_ms=measured_gloss_ms,
             degraded=degraded,
+            playback=copy.deepcopy(playback) if playback else {},
             started_at=started_at,
         )
         if unknown_lemmas:

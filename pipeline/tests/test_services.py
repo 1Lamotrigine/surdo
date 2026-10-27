@@ -11,6 +11,7 @@ from pipeline.services import (
     UtteranceValidationError,
     create_utterance,
     lag_level,
+    latest_display_lag_ms,
     recent_room_utterances,
     record_display_started,
     sign_language_for_room,
@@ -220,6 +221,36 @@ def test_display_started_from_foreign_room_is_ignored(room, owner):
     assert record_display_started(room.pk, utterance.pk) is None
     utterance.refresh_from_db()
     assert utterance.display_lag_ms is None
+
+
+def test_latest_display_lag_uses_last_measured_phrase(room):
+    first = create_utterance(room, "Первая")
+    second = create_utterance(room, "Вторая")
+    Utterance.objects.filter(pk=first.pk).update(display_lag_ms=12_000)
+    Utterance.objects.filter(pk=second.pk).update(display_lag_ms=3_000)
+
+    assert latest_display_lag_ms(room.pk) == 3_000
+    assert latest_display_lag_ms(room.pk + 100) is None
+
+
+def test_time_based_latest_lag_ignores_unshown_phrase(room):
+    shown = create_utterance(room, "Показанная")
+    Utterance.objects.filter(pk=shown.pk).update(display_lag_ms=7_000)
+    create_utterance(room, "Ещё не показанная")
+
+    assert latest_display_lag_ms(room.pk) == 7_000
+
+
+def test_playback_policy_is_saved_with_utterance(room):
+    utterance = create_utterance(
+        room,
+        "Учебник",
+        playback={"level": "yellow", "speed": 1.15, "gap_ms": 40},
+    )
+
+    utterance.refresh_from_db()
+    assert utterance.playback["level"] == "yellow"
+    assert utterance.as_event()["playback"]["speed"] == 1.15
 
 
 def test_recent_room_utterances_returns_last_phrases_in_order(room, owner):

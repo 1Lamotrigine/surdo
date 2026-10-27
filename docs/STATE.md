@@ -4,11 +4,11 @@
 
 ## Текущий этап
 
-**F7 — микрофон преподавателя и VAD в браузере: готов.**
+**F8 — управление отставанием: ускорение, сжатие и пропуск пауз: готов.**
 
-Предыдущие этапы: **F6 — приём аудиофразы, F5 — ASR, F4 — LLM в конвейере,
-F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя:
-готовы.**
+Предыдущие этапы: **F7 — микрофон и VAD, F6 — приём аудиофразы, F5 — ASR,
+F4 — LLM в конвейере, F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы,
+E5 — панель преподавателя: готовы.**
 
 ## Что готово
 
@@ -22,7 +22,7 @@ F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы
   `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
   `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`,
   `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_URL`, `LLM_TIMEOUT`,
-  `WHISPER_MODEL`, `WHISPER_DEVICE`, `ASR_TIMEOUT`.
+  `COMPRESS_TIMEOUT`, `WHISPER_MODEL`, `WHISPER_DEVICE`, `ASR_TIMEOUT`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -467,11 +467,11 @@ F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы
   увеличивает. `lag_level` делит по FR-15: `green` ≤5 с, `yellow` ≤10 с,
   `red` >10 с. `RoomConsumer` принимает `display_started`, проверяет, что фраза
   принадлежит комнате, и рассылает `lag_status`; `unknown_words` уходит вместе
-  с `utterance` из `unknown`-глоссов. Оба события отдаются только
-  преподавательским соединениям, студент их не получает. Клиент студента шлёт
-  `display_started` из `RoomPhrasePlayer` в момент начала показа, а панель
-  преподавателя показывает цветной индикатор, подсказку «замедлитесь» и слова
-  без жеста.
+  с `utterance` из `unknown`-глоссов. `lag_status` и `unknown_words` отдаются
+  только преподавательским соединениям; F8 добавил студенту отдельное событие
+  `playback`. Клиент студента шлёт `display_started` из `RoomPhrasePlayer` в
+  момент начала показа, а панель преподавателя показывает цветной индикатор,
+  подсказку «замедлитесь» и слова без жеста.
 - **Панель преподавателя (E5):** на `/rooms/<code>/live/` появилась форма ввода
   фразы и лента последних `Utterance` с номером, временем, текстом и словами без
   жеста. Форма отправляется через HTMX в `POST /rooms/<code>/live/phrase/`:
@@ -630,6 +630,7 @@ F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы
 | Распознавание речи (F5) | `services/asr.py` (`transcribe`, `transcribe_async`, `AsrResult`, `AsrProvider`, `FasterWhisperProvider`, `AsrService`) |
 | Аудиофраза в конвейере (F6) | `pipeline/api.py:phrase_api`, `pipeline/queue.py` (`AudioJob`, `submit_audio`, `process_audio_job_async`, `process_phrase_job_async`) |
 | Микрофон и VAD (F7) | `frontend/microphone.ts` (`MicrophoneController`, `setupMicrophone`), `frontend/audio-phrase.ts` (`encodeWav`, `uploadPhrase`), `templates/rooms/_microphone.html` |
+| Политика догона (F8) | `pipeline/lag_policy.py` (`lag_playback_policy`, `should_compress`), `frontend/lag-policy.ts` (`normalizePlaybackPolicy`, `effectivePlaybackSpeed`) |
 
 ## Клиент: режимы
 
@@ -2003,8 +2004,48 @@ production-сборка Vite. Сборка выпускает `vad-web-worker-*.
 - Текстовый ввод (FR-7) не спрятан и не зависит от состояния микрофона:
   карточки стоят рядом, ошибка VAD оставляет форму доступной.
 
+## F8: управление отставанием
+
+- **Пороги и политика (FR-15/FR-16):** `pipeline/lag_policy.py` — чистая
+  `lag_playback_policy(lag_ms)` поверх существующего `lag_level`. Зелёный
+  уровень (`≤5 с`) не трогает ручную скорость студента, оставляет паузу 120 мс
+  между клипами и не сжимает текст. Жёлтый (`≤10 с`) включает скорость 1.15x,
+  паузу 40 мс и сжатие до 75%. Красный (`>10 с`) — 1.3x, `gap_ms = 0` и сжатие
+  до 50%. Политика отдаётся в событии `utterance` (поле `playback`) и
+  сохраняется у `Utterance`, чтобы история и переподключение показывали фразу
+  теми же параметрами.
+- **Сжатие в конвейере:** перед глоссами `_finish_phrase_async` берёт
+  `latest_display_lag_ms` комнаты (метрику последней показанной фразы),
+  выбирает политику и при жёлтом/красном вызывает `services.gloss.compress` в
+  `asyncio.to_thread` под `COMPRESS_TIMEOUT` (по умолчанию 4 с). Если LLM не
+  настроена, упала или не уложилась в таймаут, F3 переходит на локальное
+  сжатие; при любой ошибке остаётся исходный текст. Сжатие применяется только
+  к фразам от 24 символов, чтобы не тратить LLM на короткие команды.
+- **Текущая фраза:** после `display_started` consumer по-прежнему отправляет
+  преподавателю `lag_status`, а студенту — новое событие `playback` с
+  актуальными `speed`/`gap_ms`. `RoomPhrasePlayer.setPlaybackPolicy` меняет
+  скорость и паузу уже играющего `ClipPlayer` без перезапуска; сжатие
+  применится к следующей фразе. `ClipPlayer.setGapMs` пересобирает план,
+  сохраняя текущий клип и кадр.
+- **Клиент:** `frontend/lag-policy.ts` нормализует событие, не доверяя числам,
+  и совмещает догон с ручной скоростью C7: на зелёном остаётся 0.6–1.2x, на
+  жёлтом/красном берётся максимум из ручной и серверной скорости с потолком
+  1.3x. `UtteranceEvent` получил необязательное поле `playback`; старые записи
+  без него играют как раньше.
+- **Хранение:** `Utterance.playback` — `JSONField` (миграция
+  `pipeline/0002_utterance_playback.py`), `as_event()` отдаёт его в истории и
+  WebSocket. Поле есть и у фраз, созданных путём E1 (пустой объект).
+- **Проверка:** `pipeline/tests/test_lag_policy.py` — границы 5/10 с, значения
+  скорости, пауз и коэффициентов, короткие фразы;
+  `pipeline/tests/test_lag_pipeline.py` — зелёная фраза не сжимается,
+  жёлтая/красная сжимаются, чужая комната не влияет;
+  `rooms/tests/test_consumer.py` — преподаватель получает `lag_status`, студент
+  `playback`; `frontend/lag-policy.test.ts` — нормализация и совмещение
+  скоростей. Ручная проверка: отправить несколько длинных фраз, дождаться
+  красного индикатора и убедиться, что следующая фраза короче и показывается
+  быстрее без пауз.
+
 ## Дальше
 
-**F7 готов.** Следующий — F8: пороги отставания, ускорение показа до 1.3x,
-сжатие фраз через `services.gloss.compress` и пропуск пауз между клипами.
+**F8 готов.** Следующий этап — блок G: PWA, офлайн-оболочка и выпуск.
 

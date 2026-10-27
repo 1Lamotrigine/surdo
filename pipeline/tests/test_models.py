@@ -33,6 +33,7 @@ def test_utterance_defaults(room):
     assert utterance.asr_ms is None
     assert utterance.gloss_ms is None
     assert utterance.display_lag_ms is None
+    assert utterance.playback == {}
     assert utterance.degraded is False
     assert utterance.started_at == started_at
     assert utterance.created_at is not None
@@ -78,4 +79,5 @@ def test_as_event_contains_glosses_and_seq(room):
     assert event["text"] == "Откройте учебник"
     assert event["glosses"] == utterance.glosses
     assert event["degraded"] is False
+    assert event["playback"] == {}
     assert event["ts"] == started_at.isoformat()

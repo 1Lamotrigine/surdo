@@ -150,4 +150,18 @@ describe("ClipPlayer", () => {
     player.tick();
     expect(player.currentFrame).toBe(0);
   });
+
+  it("setGapMs пересобирает план без остановки показа", async () => {
+    const fake = makeFakeVrm();
+    const player = new ClipPlayer(fake.vrm, { gapMs: 120, smoothing: false });
+    const clip = await makeClip(3);
+    player.loadQueue([clip, clip]);
+    player.start();
+
+    player.setGapMs(0);
+
+    expect(player.queue?.gapMs).toBe(0);
+    expect(player.isPlaying).toBe(true);
+    player.dispose();
+  });
 });

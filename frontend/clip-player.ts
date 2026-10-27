@@ -167,6 +167,30 @@ export class ClipPlayer {
     if (playing) this.start();
   }
 
+  /**
+   * Сменить паузу между клипами на ходу (F8): на красном уровне отставания
+   * сервер присылает ``gapMs = 0``, и пауза пропускается без остановки показа.
+   */
+  setGapMs(gapMs: number): void {
+    if (!Number.isFinite(gapMs)) return;
+    const next = Math.max(0, gapMs);
+    if (next === this.options.gapMs) return;
+    this.options.gapMs = next;
+    if (next === 0) this.gapLeft = 0;
+    if (!this.plan || this.clips.length === 0) return;
+
+    const playing = this.isPlaying;
+    this.stop();
+    this.plan = planQueue(this.clips.map(toQueueClip), {
+      speed: this.options.speed,
+      crossfadeMs: this.options.crossfadeMs,
+      gapMs: this.options.gapMs,
+      mode: this.options.mode,
+    });
+    this.computeIntervals();
+    if (playing) this.start();
+  }
+
   /** Один шаг воспроизведения: показать текущий кадр и перейти к следующему. */
   tick(): void {
     if (this.clips.length === 0) return;
