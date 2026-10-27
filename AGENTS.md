@@ -15,7 +15,10 @@
 | PostgreSQL | 16 |
 | Redis | 7 |
 | Caddy | 2 |
-| Node.js (этап A3) | 22 LTS |
+| Node.js | 22 LTS |
+| Vite / TypeScript | 8.3.5 / 7.0.2 |
+| django-vite | 3.2.0 |
+| htmx | 2.0.11 |
 | pytest / pytest-django / ruff | 9.1.1 / 4.14.0 / 0.17.3 |
 | daphne (только тесты Channels) | 4.2.3 |
 
@@ -32,9 +35,9 @@ app/
 ├── dictionary/      # жесты, клипы, версии словаря, ревью (блок B)
 ├── pipeline/        # приём фразы, Utterance, метрики (блок E)
 ├── services/        # pure-Python: asr, gloss, compress (блок F)
-├── frontend/        # JS-модули и Vite (появится на A3)
+├── frontend/        # JS/TS-модули; точка входа main.ts
 ├── templates/       # Django-шаблоны + HTMX
-├── static/          # статика проекта
+├── static/          # статика проекта; static/dist — сборка Vite (не коммитится)
 ├── tests/           # сквозные тесты проекта
 ├── docs/spec/       # выжимки из ТЗ по разделам
 ├── docs/STATE.md    # состояние проекта
@@ -61,10 +64,12 @@ app/
 ## Команды
 
 ```bash
-make setup     # .env + venv + зависимости (нужен uv)
-make check     # ruff check + pytest; поднимает контейнер db
+make setup     # .env + venv + Python- и npm-зависимости
+make check     # ruff + tsc + pytest + vite build; поднимает контейнер db
 make up        # docker compose up --build (Caddy на :80)
 make migrate   # миграции внутри web
+make client-dev # Vite dev-сервер с HMR на :5173
+make client-build # production-сборка в static/dist
 ```
 
 `make test` использует PostgreSQL из compose на `127.0.0.1:55432` (не 5432, чтобы

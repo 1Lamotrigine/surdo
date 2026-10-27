@@ -6,9 +6,21 @@ from django.urls import reverse
 
 def test_home_page_renders(client):
     response = client.get(reverse("home"))
+    html = response.content.decode()
 
     assert response.status_code == 200
-    assert "Лекция с аватаром" in response.content.decode()
+    assert "Лекция с аватаром" in html
+    assert "text/html" in response["Content-Type"]
+    assert "data-client-status" in html
+    assert "/static/dist/" in html
+    assert 'hx-get="/partials/htmx-demo/"' in html
+
+
+def test_htmx_demo_returns_fragment(client):
+    response = client.get(reverse("htmx-demo"))
+
+    assert response.status_code == 200
+    assert "HTMX работает" in response.content.decode()
     assert "text/html" in response["Content-Type"]
 
 
