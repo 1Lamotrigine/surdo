@@ -4,6 +4,7 @@
 .gitignore
 media
 staticfiles
+static/dist
 __pycache__
 *.pyc
 .pytest_cache

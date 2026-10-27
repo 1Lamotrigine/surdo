@@ -13,6 +13,11 @@ def home(request: HttpRequest):
     return render(request, "home.html")
 
 
+def htmx_demo(request: HttpRequest):
+    """Небольшой фрагмент для проверки HTMX без перезагрузки страницы."""
+    return render(request, "partials/htmx_demo.html")
+
+
 def health(request: HttpRequest) -> JsonResponse:
     checks: dict[str, str] = {}
     healthy = True

@@ -1,4 +1,4 @@
-{% load static %}<!doctype html>
+{% load static django_vite %}<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8">
@@ -6,13 +6,18 @@
     <title>{% block title %}ИИ-аватар сурдопереводчик{% endblock %}</title>
     <meta name="description" content="Прототип помощника-сурдопереводчика для лекций: аватар, субтитры и чат в браузере.">
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    {% vite_hmr_client %}
+    {% vite_asset 'frontend/main.ts' %}
   </head>
   <body>
     <a class="skip-link" href="#main">Перейти к содержимому</a>
     <header class="site-header">
       <div class="wrap header-inner">
         <a class="brand" href="/">Жест<span>·</span>Прототип</a>
-        <span class="badge">MVP · русский / РЖЯ</span>
+        <div class="badges">
+          <span class="badge">MVP · русский / РЖЯ</span>
+          <span class="badge client-badge" data-client-status data-state="loading" aria-live="polite">Клиент: загрузка…</span>
+        </div>
       </div>
     </header>
 

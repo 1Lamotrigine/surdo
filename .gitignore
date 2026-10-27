@@ -5,6 +5,7 @@ __pycache__/
 .env
 media/
 staticfiles/
+static/dist/
 .pytest_cache/
 .ruff_cache/
 .coverage

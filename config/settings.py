@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
+    "django_vite",
     "accounts",
     "rooms",
     "dictionary",
@@ -113,6 +114,16 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+
+DJANGO_VITE = {
+    "default": {
+        "dev_mode": env_bool("DJANGO_VITE_DEV_MODE", DEBUG),
+        "dev_server_host": os.environ.get("DJANGO_VITE_DEV_SERVER_HOST", "localhost"),
+        "dev_server_port": int(os.environ.get("DJANGO_VITE_DEV_SERVER_PORT", "5173")),
+        "static_url_prefix": "dist",
+        "manifest_path": BASE_DIR / "static" / "dist" / "manifest.json",
+    }
+}
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
