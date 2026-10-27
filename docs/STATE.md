@@ -4,7 +4,9 @@
 
 ## Текущий этап
 
-**E5 — панель преподавателя: готов.**
+**F1 — LLM-глоссы (`services.gloss`): готов.**
+
+Предыдущий этап: **E5 — панель преподавателя: готов.**
 
 ## Что готово
 
@@ -475,6 +477,24 @@
   обычным POST с редиректом и сообщением. Начальный список слов без жеста
   берётся из последней фразы, дальше его обновляет E4-событие `unknown_words`.
   Права прежние: владелец комнаты или администратор, остальные — 403.
+- **LLM-глоссы (F1):** `services/gloss.py` — чистый модуль без Django.
+  `LLMProvider` (Protocol) получает промпт и JSON-схему, возвращает строку;
+  `CallableProvider` адаптирует функцию, провайдер по умолчанию задаётся
+  `set_default_provider` (его настроит F4). `gloss_response_schema` описывает
+  ответ ТЗ 7.2 (`lang`, `text`, `sentence_type`, `tokens` типов
+  `sign`/`number`/`fingerspell`, `unknown`). `build_gloss_prompt` собирает
+  правила РЖЯ, проверенные глоссы, few-shot примеры и схему;
+  `parse_gloss_response`/`validate_glosses` проверяют JSON (в том числе в
+  ```-блоке), нормализуют числа, маркеры и буквы, подставляя исходные
+  `text`/`lang`. `GlossDictionary` индексирует глоссы с нормализацией (регистр,
+  ё→е), `restrict_to_dictionary` оставляет только глоссы словаря, а всё
+  остальное превращает в дактиль и пересобирает `unknown`. `GlossCache` — LRU в
+  памяти процесса, ключ `gloss_cache_key` — SHA-256 от нормализованной фразы,
+  языка, версии/содержимого словаря и примеров; битые ответы и ошибки
+  провайдера не кэшируются. `to_glosses(text, lang, GlossDictionary, *,
+  provider, cache, timeout, examples)` — точка входа; ошибки провайдера
+  оборачиваются в `LLMUnavailableError`, невалидный ответ — в
+  `GlossFormatError`.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -534,6 +554,7 @@
 | JS MediaPipe и скелета (D1) | `frontend/holistic.ts` (`HolisticDetector`, `normalizeHolisticResult`), `frontend/skeleton.ts`, `frontend/record-page.ts` |
 | JS записи и упаковки клипа (D2) | `frontend/clip-record.ts` (`encodeRecordedClip`, `autoTrimRange`, `resampleCapturedFrames`), `frontend/clip-encode.ts` (`encodeClipPayload`, `packClipFile`) |
 | JS сохранения черновика (D3–D4) | `frontend/sign-draft.ts` (`validateSignDraft`, `submitSignDraft`, `unknown_word`), форма в `frontend/record-page.ts` |
+| Сервис LLM-глосс (F1) | `services/gloss.py` (`to_glosses`, `build_gloss_prompt`, `gloss_response_schema`, `GlossDictionary`, `GlossCache`, `LLMProvider`) |
 
 ## Клиент: режимы
 
@@ -696,6 +717,13 @@
 - `services/tests/test_clip_format.py` — `pack_clip`/`parse_clip`: roundtrip,
   gzip/JSON, версия, `fps`/`frames`, лимит кадров, `layout`/`data`,
   `duration_ms`.
+- `services/tests/test_gloss.py` (F1) — JSON-схема и промпт (правила, словарь,
+  few-shot, пустой словарь), разбор ответа (```-блок, подстановка `text`/`lang`,
+  числа, маркеры, буквы, 11 видов битых ответов), ограничение словарём
+  (канонизация регистра/ё, выдуманная глосса → дактиль, пересборка `unknown`,
+  язык словаря), кэш (хэш без лишних пробелов, версия словаря и язык в ключе,
+  независимые копии, отсутствие кэша для ошибок, LRU, таймаут/схема провайдера,
+  `CallableProvider`, примеры), 30 реальных фраз с моком LLM — формат корректен.
 - `dictionary/tests/test_statuses.py` — чистые правила переходов: разрешённые и
   запрещённые пары, требуемые роли, `allowed_targets`, совпадение значений
   `StrEnum` и `TextChoices`.
@@ -1517,11 +1545,57 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
   отдельный сервис `pipeline.services.recent_room_utterances`. Это не мешает E5,
   но остаётся отдельным решением для клиента после обрыва.
 
+## Проверка F1
+
+```bash
+.venv/bin/python -m pytest services/tests/test_gloss.py -q   # 36 passed
+```
+
+Автотесты работают без сети и реального ключа: `FakeProvider` подменяет LLM и
+проверяет промпт, схему, таймаут и число вызовов. Отдельный тест прогоняет 30
+реальных фраз лекции, на каждой проверяет повторную валидацию результата,
+допустимые типы токенов, глоссы только из словаря и согласованность `unknown`.
+Ручная проверка провайдера (ключ, модель, качество перевода) появится при
+настройке F4: F1 сознательно не делает сетевых вызовов.
+
+## Решения F1
+
+- `services.gloss` — чистый Python без Django: провайдер, промпт, схема, словарь
+  и кэш тестируются без базы и сети, а F4 вызовет `to_glosses` из
+  `asyncio.to_thread`, не завязывая сервис на ORM.
+- Провайдер спрятан за `Protocol` с методом `complete(prompt, *, schema,
+  timeout)`: он получает и промпт, и JSON-схему, поэтому API-клиент, Ollama или
+  мок подставляются без изменения остального кода. `CallableProvider` нужен для
+  тестов и ручных экспериментов.
+- Глоссы не берутся из ответа LLM на веру: `restrict_to_dictionary` — вторая,
+  серверная проверка ТЗ 5.3. Выдуманная глосса или другой регистр не проходят;
+  неизвестное слово превращается в `fingerspell` по `src`, а `unknown`
+  пересобирается из токенов, поэтому модель не может рассинхронизировать два
+  поля.
+- JSON-схема исключает `utterance_id`: его выдаёт сервер в `pipeline`, а не
+  модель. Поля `lang`/`text` модель обязана повторить, но `parse_gloss_response`
+  всё равно подставляет исходные значения — доверять тексту фразы модели нельзя.
+- Парсер терпим к ```json-обёртке, строковым/дробным целым числам и забытым
+  `letters` (дактиль достраивается по `src`), но строг к типам токенов,
+  маркерам, `sentence_type` и структуре: невалидный ответ — `GlossFormatError`,
+  который F4 превратит в упрощённый режим.
+- Кэш — LRU в памяти процесса, как очереди конвейера (один процесс uvicorn).
+  Ключ — SHA-256 от нормализованной фразы, языка, версии и **содержимого**
+  словаря и примеров: изменение словаря или few-shot не отдаёт старые глоссы,
+  даже если номер версии забыли поднять. Ошибки и невалидные ответы не
+  кэшируются, иначе сбой LLM закрепился бы на всё время лекции.
+- Кэш отдаёт глубокие копии: вызывающий код (субтитры, очередь клипов) не может
+  испортить закэшированные глоссы. Интерфейс `get`/`set` позволит позже положить
+  под него `django.core.cache`, не меняя `to_glosses`.
+- Провайдер по умолчанию — модульная настройка (`set_default_provider`), а не
+  чтение `settings` внутри сервиса: F1 не подключает Django, а F4 выберет
+  провайдера из `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY` и таймаута один раз.
+
 ## Дальше
 
-**E5 готов, блок E закрыт.** Следующий — F1: интерфейс провайдера LLM, промпт и
-JSON-схема глосс с ограничением словарём и кэшем по хэшу фразы. История фраз
-после переподключения и сжатие/ускорение по FR-16 остаются отдельными задачами
-(история — клиентский контракт, FR-16 — F8). Читать:
-`docs/spec/gloss-format.md`, `docs/spec/architecture.md`,
-`docs/spec/requirements.md`, `pipeline/services.py`, `services/`.
+**F1 готов.** Следующий — F2: запасной режим без LLM (лемматизация `pymorphy3` и
+пословный перевод) за тем же форматом глосс. Затем F3 (сжатие длинной фразы) и
+F4 ★ (подключение `to_glosses` к конвейеру через `asyncio.to_thread`, таймауты,
+`degraded` при ошибке). Читать: `docs/spec/api.md`, `docs/spec/gloss-format.md`,
+`docs/spec/requirements.md`, `services/gloss.py`, `pipeline/services.py`.
+
