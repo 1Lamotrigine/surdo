@@ -1266,6 +1266,43 @@ h1 {
   color: #78350f;
 }
 
+/* G2 / FR-27: карточка предложения установки PWA на странице студента. */
+.install-prompt {
+  margin-top: 1.25rem;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--accent);
+  border-radius: 0.75rem;
+  background: #eff6ff;
+  color: var(--text);
+}
+
+.install-prompt[hidden] {
+  display: none;
+}
+
+.install-prompt-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.install-prompt-hint {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  max-width: 42rem;
+}
+
+.install-prompt-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
 .room-display-closed {
   background: #f8fafc;
 }

@@ -119,3 +119,24 @@ def test_live_shows_guest_after_join(client, open_room):
     assert "data-student-view" in html
     assert "data-wake-lock-status" in html
     assert "data-notification-status" in html
+
+
+def test_live_offers_pwa_install_after_join(client, open_room):
+    """G2 / FR-27: после входа студенту предлагается установка PWA."""
+    client.post(
+        reverse("room_student:join", kwargs={"join_code": OPEN_ROOM_CODE}),
+        {"name": "Гость"},
+    )
+
+    html = client.get(
+        reverse("room_student:live", kwargs={"join_code": OPEN_ROOM_CODE})
+    ).content.decode()
+
+    # Карточка предложения есть в разметке и скрыта до решения клиента.
+    assert "data-install-prompt" in html
+    assert "Установить приложение?" in html
+    # Кнопки: системная установка (Chromium) и отказ.
+    assert "data-install-accept" in html
+    assert "data-install-dismiss" in html
+    # Подсказка подставляется клиентом по способу установки.
+    assert "data-install-hint" in html

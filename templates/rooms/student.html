@@ -48,6 +48,20 @@
       </aside>
     {% endif %}
 
+    {# G2 / FR-27: предложение установки PWA. Скрыто, пока JS не решит показать. #}
+    <aside class="install-prompt" data-install-prompt hidden aria-live="polite">
+      <div class="install-prompt-text">
+        <h2 class="install-prompt-title">Установить приложение?</h2>
+        <p class="install-prompt-hint" data-install-hint></p>
+      </div>
+      <div class="install-prompt-actions">
+        <button type="button" class="button" data-install-accept hidden>
+          Установить
+        </button>
+        <button type="button" class="link-button" data-install-dismiss>Не сейчас</button>
+      </div>
+    </aside>
+
     <div class="student-columns">
       {% include "rooms/_chat.html" %}
 

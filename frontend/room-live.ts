@@ -10,6 +10,7 @@ import {
   setupMicrophone,
   type MicrophoneController,
 } from "./microphone";
+import { InstallPrompt } from "./install-prompt";
 import {
   ScreenNotifier,
   ScreenWakeLock,
@@ -255,6 +256,15 @@ export function setupRoomLive(root: HTMLElement): void {
         { once: true },
       );
     }
+  }
+
+  // G2 / FR-27: предложение установки PWA после входа в комнату. Только на
+  // странице студента и только если карточка есть в разметке.
+  const installRoot = isStudentView
+    ? root.querySelector<HTMLElement>("[data-install-prompt]")
+    : null;
+  if (installRoot) {
+    new InstallPrompt({ root: installRoot });
   }
 
   const setStatus = (text: string, state: "loading" | "ready" | "error"): void => {

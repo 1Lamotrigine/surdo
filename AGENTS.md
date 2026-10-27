@@ -205,6 +205,17 @@ app/
   манифест и иконки в `templates/base.html`; `frontend/pwa.ts` добавляет
   `<link rel="manifest">`, если его ещё нет, и регистрирует SW по `load` только
   на HTTPS или localhost. Манифест и `sw.js` открыты без авторизации.
+- Предложение установки PWA (G2, FR-27): `frontend/install-prompt.ts` — чистая
+  `installEnvironment` (iOS/iPadOS по `userAgent` + `maxTouchPoints`) и
+  `installOffer` (`native` для Chromium с `beforeinstallprompt`, `ios` для
+  Safari, иначе ничего; `null` в standalone и при закрытом предложении), плюс
+  класс `InstallPrompt`. Карточка `[data-install-prompt]` есть в
+  `templates/rooms/student.html` и скрыта до решения клиента; на iOS кнопка
+  «Установить» прячется (системного диалога там нет) и остаётся инструкция
+  «Поделиться → На экран Домой». Отказ запоминается в `localStorage`
+  (`gluho-nemye:install-prompt:v1`) и больше не показывается. Включается в
+  `frontend/room-live.ts` только для студенческой страницы. Предложение
+  необязательное: страница работает и без установки.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при
