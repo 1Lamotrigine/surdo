@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Вход в комнату {{ room.join_code }} · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="auth-card join-card">
+    <p class="eyebrow">Комната {{ room.join_code }}</p>
+    <h1>Вход без регистрации</h1>
+    <p class="lead">
+      Курс «{{ room.title }}». Введите имя, чтобы войти — оно будет видно
+      преподавателю и другим студентам.
+    </p>
+
+    <form class="auth-form" method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="form-errors" role="alert">
+          {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="field">
+        {{ form.name.label_tag }}
+        {{ form.name }}
+        {% for error in form.name.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+      </div>
+
+      <p class="consent">
+        Входя, вы соглашаетесь на обработку имени и текста сообщений в рамках урока.
+        Аудио не записывается.
+      </p>
+
+      <button class="button" type="submit">Войти в комнату</button>
+    </form>
+
+    {% if already_joined %}
+      <p class="auth-switch">
+        Вы уже входили в эту комнату.
+        <a href="{% url 'room_student:live' join_code=room.join_code %}">Продолжить</a>.
+      </p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -4,13 +4,22 @@ import logging
 
 from django.db import connection
 from django.http import HttpRequest, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+
+from rooms.forms import JoinCodeForm
 
 logger = logging.getLogger(__name__)
 
 
 def home(request: HttpRequest):
-    return render(request, "home.html")
+    # POST — студент вводит ID комнаты на главной и попадает на `/r/<code>/`.
+    if request.method == "POST":
+        join_form = JoinCodeForm(request.POST)
+        if join_form.is_valid():
+            return redirect("room_student:join", join_code=join_form.cleaned_data["join_code"])
+        return render(request, "home.html", {"join_form": join_form}, status=400)
+
+    return render(request, "home.html", {"join_form": JoinCodeForm()})
 
 
 def htmx_demo(request: HttpRequest):

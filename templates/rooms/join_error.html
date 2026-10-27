@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Комната недоступна · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="auth-card join-card">
+    {% if rate_limited %}
+      <p class="eyebrow">Слишком много попыток</p>
+      <h1>Подождите немного</h1>
+      <p class="lead">
+        Слишком много попыток входа. Повторите через {{ retry_after }} с.
+      </p>
+    {% elif closed %}
+      <p class="eyebrow">Комната закрыта</p>
+      <h1>Комната закрыта</h1>
+      <p class="lead">
+        Комната <strong>{{ join_code }}</strong> больше не принимает участников.
+        Попросите преподавателя создать новую комнату.
+      </p>
+    {% else %}
+      <p class="eyebrow">Комната не найдена</p>
+      <h1>Неверный ID</h1>
+      <p class="lead">
+        Комнаты <strong>{{ join_code }}</strong> нет. Проверьте ID — возможно,
+        в нём ошибка.
+      </p>
+    {% endif %}
+
+    <p class="auth-switch">
+      <a href="{% url 'home' %}">Вернуться на главную</a>
+    </p>
+  </section>
+{% endblock %}

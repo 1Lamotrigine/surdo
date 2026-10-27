@@ -2,7 +2,15 @@
 
 from django.contrib import admin
 
-from rooms.models import Room
+from rooms.models import Participant, Room
+
+
+class ParticipantInline(admin.TabularInline):
+    model = Participant
+    extra = 0
+    fields = ("user", "guest_name", "session_key", "joined_at", "removed_at")
+    readonly_fields = ("session_key", "joined_at")
+    autocomplete_fields = ("user",)
 
 
 @admin.register(Room)
@@ -20,6 +28,7 @@ class RoomAdmin(admin.ModelAdmin):
     search_fields = ("join_code", "title", "owner__email", "owner__name")
     list_select_related = ("owner",)
     readonly_fields = ("join_code", "created_at", "closed_at")
+    inlines = (ParticipantInline,)
     actions = ("close_rooms",)
 
     @admin.action(description="Закрыть выбранные комнаты")
@@ -29,3 +38,13 @@ class RoomAdmin(admin.ModelAdmin):
             room.close()
             closed += 1
         self.message_user(request, f"Закрыто комнат: {closed}.")
+
+
+@admin.register(Participant)
+class ParticipantAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "room", "user", "joined_at", "removed_at")
+    list_filter = ("removed_at", "room__status")
+    search_fields = ("guest_name", "user__email", "user__name", "room__join_code")
+    list_select_related = ("room", "user")
+    readonly_fields = ("joined_at",)
+    autocomplete_fields = ("user",)
