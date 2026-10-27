@@ -2,7 +2,16 @@
  * Живой клиент комнаты (A8–A11): одно WebSocket-соединение на страницу.
  * Presence, история и чат; ping раз в 20 с (heartbeat), переподключение с
  * нарастающей паузой (1, 2, 4, 8 с, потолок 15 с) и догрузка пропущенного.
+ * На странице студента дополнительно держит экран включённым и уведомляет
+ * подсветкой/вибрацией (C8).
  */
+
+import {
+  ScreenNotifier,
+  ScreenWakeLock,
+  notificationKindFor,
+  type NotificationKind,
+} from "./notifications";
 
 type PresenceEntry = {
   name: string;
@@ -24,6 +33,7 @@ type ServerEvent =
   | { type: "chat_history"; messages: ChatMessage[] }
   | { type: "chat_message"; message: ChatMessage }
   | { type: "chat_error"; error: string; retry_after?: number }
+  | { type: "utterance" }
   | { type: "pong" }
   | { type: "room_closed" }
   | { type: "participant_removed" }
@@ -64,6 +74,8 @@ export function setupRoomLive(root: HTMLElement): void {
   const chatInput = root.querySelector<HTMLTextAreaElement>("[data-chat-input]");
   const chatHint = root.querySelector<HTMLElement>("[data-chat-hint]");
   const isTeacherView = root.hasAttribute("data-teacher-view");
+  const isStudentView = root.hasAttribute("data-student-view");
+  const wakeLockStatus = root.querySelector<HTMLElement>("[data-wake-lock-status]");
   const removeParticipantUrl = root.dataset.removeParticipantUrl;
   const csrfToken = root.dataset.csrfToken;
   let pingTimer: number | undefined;
@@ -72,6 +84,54 @@ export function setupRoomLive(root: HTMLElement): void {
   let lastSeq = 0;
   let reconnectAttempt = 0;
   let closed = false;
+
+  // C8: уведомления и Wake Lock только на странице студента, не в панели.
+  const notifier = isStudentView ? new ScreenNotifier(root) : null;
+  const wakeLock = isStudentView ? new ScreenWakeLock() : null;
+
+  const setWakeLockStatus = (text: string, state: "on" | "off" | "pending"): void => {
+    if (!wakeLockStatus) return;
+    wakeLockStatus.textContent = text;
+    wakeLockStatus.dataset.state = state;
+  };
+
+  const notifyStudent = (kind: NotificationKind | null): void => {
+    if (kind) notifier?.notify(kind);
+  };
+
+  const announceWakeLock = (active: boolean): void => {
+    setWakeLockStatus(
+      active
+        ? "Экран не погаснет, пока открыта комната."
+        : "Не удалось удержать экран включённым.",
+      active ? "on" : "off",
+    );
+  };
+
+  const stopStudentFeatures = (): void => {
+    void wakeLock?.disable();
+    if (wakeLock?.supported) setWakeLockStatus("Удержание экрана снято.", "off");
+    notifier?.clear();
+  };
+
+  if (wakeLock) {
+    if (!wakeLock.supported) {
+      setWakeLockStatus("Браузер не поддерживает удержание экрана.", "off");
+    } else {
+      setWakeLockStatus("Удерживаем экран включённым…", "pending");
+      void wakeLock.enable().then(announceWakeLock);
+      // Некоторые браузеры дают Wake Lock только после касания — повторяем
+      // один раз при первом взаимодействии, если с первого раза не вышло.
+      window.addEventListener(
+        "pointerdown",
+        () => {
+          if (wakeLock.active) return;
+          void wakeLock.enable().then(announceWakeLock);
+        },
+        { once: true },
+      );
+    }
+  }
 
   const setStatus = (text: string, state: "loading" | "ready" | "error"): void => {
     if (status) {
@@ -202,6 +262,14 @@ export function setupRoomLive(root: HTMLElement): void {
         renderHistory(payload.messages);
       } else if (isEvent(payload, "chat_message")) {
         appendMessage(payload.message);
+        notifyStudent(
+          notificationKindFor(
+            { type: "chat_message", is_teacher: payload.message.is_teacher },
+            isStudentView,
+          ),
+        );
+      } else if (isEvent(payload, "utterance")) {
+        notifyStudent(notificationKindFor({ type: "utterance" }, isStudentView));
       } else if (isEvent(payload, "chat_error") && chatHint) {
         chatHint.textContent =
           payload.error === "rate_limited"
@@ -210,9 +278,11 @@ export function setupRoomLive(root: HTMLElement): void {
       } else if (payload.type === "room_closed") {
         closed = true;
         setStatus("Комната закрыта", "error");
+        stopStudentFeatures();
       } else if (payload.type === "participant_removed") {
         closed = true;
         setStatus("Преподаватель удалил вас из комнаты", "error");
+        stopStudentFeatures();
       }
     });
 
@@ -241,6 +311,18 @@ export function setupRoomLive(root: HTMLElement): void {
     if (chatInput) chatInput.value = "";
     if (chatHint) chatHint.textContent = "";
   });
+
+  // Уход со страницы: снять Wake Lock и подсветку, чтобы не держать экран
+  // включённым в фоне и не оставлять класс на body.
+  window.addEventListener(
+    "pagehide",
+    () => {
+      window.clearInterval(pingTimer);
+      void wakeLock?.disable();
+      notifier?.dispose();
+    },
+    { once: true },
+  );
 
   connect();
 }

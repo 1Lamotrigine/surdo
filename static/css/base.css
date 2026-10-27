@@ -297,6 +297,65 @@ main {
   color: #7f1d1d;
 }
 
+/* C8: уведомления студента — Wake Lock, подсветка и вибрация */
+.student-notifications {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.wake-lock-status[data-state="on"] {
+  color: #14532d;
+}
+
+.wake-lock-status[data-state="off"] {
+  color: #7f1d1d;
+}
+
+.notification-status {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+body.notification-flash::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  animation: notification-flash 700ms ease-out;
+}
+
+body.notification-flash[data-notification="phrase"]::after {
+  background: rgba(29, 78, 216, 0.32);
+}
+
+body.notification-flash[data-notification="chat"]::after {
+  background: rgba(5, 150, 105, 0.32);
+}
+
+@keyframes notification-flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.notification-flash::after {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 .presence-panel {
   padding: 1.25rem 1.4rem;
   background: var(--surface);

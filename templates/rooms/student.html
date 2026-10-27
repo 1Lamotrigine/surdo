@@ -4,7 +4,7 @@
 {% block title %}{{ room.title }} · ИИ-аватар сурдопереводчик{% endblock %}
 
 {% block content %}
-  <section class="student-room" data-room-live data-join-code="{{ room.join_code }}">
+  <section class="student-room" data-room-live data-student-view data-join-code="{{ room.join_code }}">
     <header class="student-head">
       <p class="eyebrow">Комната {{ room.join_code }}</p>
       <h1>{{ room.title }}</h1>
@@ -14,6 +14,12 @@
       </p>
       <p class="socket-status" data-socket-status data-state="loading" aria-live="polite">
         Подключение…
+      </p>
+      <p class="student-notifications">
+        <span class="wake-lock-status" data-wake-lock-status data-state="pending" aria-live="polite">
+          Удерживаем экран включённым…
+        </span>
+        <span class="notification-status" data-notification-status aria-live="polite"></span>
       </p>
     </header>
 

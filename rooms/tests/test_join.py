@@ -115,3 +115,7 @@ def test_live_shows_guest_after_join(client, open_room):
     # Страница готовит WebSocket-клиент комнаты (A8).
     assert f'data-join-code="{OPEN_ROOM_CODE}"' in html
     assert "data-presence-list" in html
+    # C8: уведомления студента и удержание экрана.
+    assert "data-student-view" in html
+    assert "data-wake-lock-status" in html
+    assert "data-notification-status" in html
