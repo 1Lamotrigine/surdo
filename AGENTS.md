@@ -20,6 +20,7 @@
 | three / @pixiv/three-vrm / @types/three | 0.186.1 / 3.5.5 / 0.186.0 |
 | kalidokit | 1.1.5 |
 | @mediapipe/tasks-vision | 1.1.1 |
+| vad-web | 0.7.0 |
 | vitest / @types/node | 5.0.5 / 22.20.5 |
 | django-vite | 3.2.0 |
 | htmx | 2.0.11 |
@@ -162,6 +163,14 @@ app/
   измеряет `asr_ms`, затем идёт общим путём: `asr_text` → глоссы → `Utterance`
   с `seq` → `utterance`. Пустой результат ASR не создаёт фразу; ошибка/таймаут
   ASR логируется и завершает `Future` ошибкой, не убивая воркер.
+- Микрофон и VAD (F7): карточка `_microphone.html` на панели преподавателя,
+  `frontend/microphone.ts` + `frontend/audio-phrase.ts`. `vad-web@0.7.0`
+  импортируется динамически только по кнопке, работает в Web Worker, отдаёт
+  фразу 16 кГц mono по паузе; она кодируется в PCM16 WAV и уходит multipart в
+  F6 endpoint с `X-CSRFToken`. Отправка последовательная, ошибка не выключает
+  микрофон и не блокирует текстовую форму FR-7. `pagehide` и `room_closed`
+  останавливают запись. Первый запуск скачивает модель Silero VAD; нужен
+  HTTPS/localhost. Vite сам собирает worker и wasm-ассет `vad-web`.
 - Живые фразы (E3): `pipeline/events.py` рассылает в группу `room_<id>`
   `asr_text` (сразу распознанный текст) и `utterance` (глоссы E1 + клипы
   проверенных жестов/чисел/дактиля в порядке показа). Фоновый поток очереди

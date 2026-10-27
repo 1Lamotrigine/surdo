@@ -546,6 +546,88 @@ body.notification-flash[data-notification="chat"]::after {
   gap: 1.25rem;
 }
 
+.teacher-live-main {
+  display: grid;
+  gap: 1.25rem;
+}
+
+/* F7: микрофон преподавателя с VAD. */
+.microphone-panel {
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.microphone-panel[data-state="listening"],
+.microphone-panel[data-state="speech"],
+.microphone-panel[data-state="uploading"] {
+  border-color: #15803d;
+  background: #f8fdf9;
+}
+
+.microphone-panel[data-state="error"] {
+  border-color: #b91c1c;
+  background: #fffafa;
+}
+
+.microphone-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.microphone-head h2 {
+  margin: 0.1rem 0 0;
+  font-size: 1.15rem;
+}
+
+.microphone-hint {
+  max-width: 42rem;
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.microphone-status {
+  margin: 0.85rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.microphone-status[data-state="idle"] {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.microphone-status[data-state="loading"],
+.microphone-status[data-state="uploading"] {
+  color: #3730a3;
+}
+
+.microphone-status[data-state="listening"],
+.microphone-status[data-state="speech"] {
+  color: #14532d;
+}
+
+.microphone-status[data-state="error"] {
+  color: #b91c1c;
+}
+
+.microphone-count {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.microphone-panel .button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* E5: ввод фразы и лента преподавателя. */
 .phrase-composer,
 .phrase-feed {

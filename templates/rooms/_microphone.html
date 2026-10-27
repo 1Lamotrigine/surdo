@@ -1,0 +1,30 @@
+{% comment %}
+F7: микрофон преподавателя с VAD. Запись стартует только по кнопке — браузер
+не просит доступ при загрузке страницы. Текстовая форма ниже остаётся
+запасным режимом (FR-7).
+{% endcomment %}
+<section class="microphone-panel" data-microphone data-state="idle"
+         data-phrase-url="{% url 'api-room-phrase' join_code=room.join_code %}">
+  <div class="microphone-head">
+    <div>
+      <p class="eyebrow">Голос</p>
+      <h2>Микрофон преподавателя</h2>
+      <p class="microphone-hint">
+        VAD делит речь на фразы по паузам. Первый запуск загружает модель VAD
+        в браузере и может занять несколько секунд.
+      </p>
+    </div>
+    <button class="button" type="button" data-mic-toggle aria-pressed="false"
+            {% if room.is_closed %}disabled{% endif %}>
+      Включить микрофон
+    </button>
+  </div>
+  <p class="microphone-status" data-mic-status data-state="idle" role="status" aria-live="polite">
+    {% if room.is_closed %}
+      Комната закрыта: микрофон недоступен.
+    {% else %}
+      Микрофон выключен. Можно ввести фразу текстом.
+    {% endif %}
+  </p>
+  <p class="microphone-count" data-mic-count hidden></p>
+</section>

@@ -7,6 +7,10 @@
  */
 
 import {
+  setupMicrophone,
+  type MicrophoneController,
+} from "./microphone";
+import {
   ScreenNotifier,
   ScreenWakeLock,
   notificationKindFor,
@@ -87,6 +91,20 @@ export function setupRoomLive(root: HTMLElement): void {
   const unknownWordsList = root.querySelector<HTMLElement>("[data-unknown-words]");
   const removeParticipantUrl = root.dataset.removeParticipantUrl;
   const csrfToken = root.dataset.csrfToken;
+  const microphoneRoot = isTeacherView
+    ? root.querySelector<HTMLElement>("[data-microphone]")
+    : null;
+  let microphone: MicrophoneController | null = null;
+  if (microphoneRoot) {
+    microphone = setupMicrophone(microphoneRoot, {
+      phraseUrl:
+        microphoneRoot.dataset.phraseUrl || `/api/rooms/${joinCode}/phrase/`,
+      csrfToken: csrfToken ?? "",
+    });
+    if (!csrfToken) {
+      microphone.disable("Не найден CSRF-токен. Обновите страницу.");
+    }
+  }
   let pingTimer: number | undefined;
   let socket: WebSocket | undefined;
   let lastMessageId = 0;
@@ -406,6 +424,7 @@ export function setupRoomLive(root: HTMLElement): void {
         closed = true;
         setStatus("Комната закрыта", "error");
         stopStudentFeatures();
+        microphone?.disable();
       } else if (payload.type === "participant_removed") {
         closed = true;
         setStatus("Преподаватель удалил вас из комнаты", "error");
@@ -447,6 +466,7 @@ export function setupRoomLive(root: HTMLElement): void {
       window.clearInterval(pingTimer);
       void wakeLock?.disable();
       notifier?.dispose();
+      void microphone?.dispose();
       phrasePlayer?.then((player) => player.dispose()).catch(() => undefined);
       phrasePlayer = null;
     },

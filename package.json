@@ -14,7 +14,8 @@
     "@pixiv/three-vrm": "3.5.5",
     "htmx.org": "2.0.11",
     "kalidokit": "1.1.5",
-    "three": "0.186.1"
+    "three": "0.186.1",
+    "vad-web": "0.7.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5",

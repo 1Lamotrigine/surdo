@@ -1,5 +1,7 @@
 """Страницы комнаты: создание, QR и доступ."""
 
+import re
+
 import pytest
 from django.urls import reverse
 from django.utils import timezone
@@ -185,6 +187,25 @@ def test_teacher_live_shows_phrase_form_feed_and_unknown_words(client, owner):
     assert "Откройте учебник Иванов" in html
     assert "Иванов" in html
     assert "Фраза для показа студентам" in html
+    assert "data-microphone" in html
+    assert "data-mic-toggle" in html
+    assert reverse("api-room-phrase", kwargs={"join_code": room.join_code}) in html
+
+
+def test_teacher_live_disables_microphone_for_closed_room(client, owner):
+    room = Room.objects.create(owner=owner, join_code="LIVE06")
+    room.close()
+    client.force_login(owner)
+
+    response = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code}))
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert "data-microphone" in html
+    assert "Комната закрыта: микрофон недоступен." in html
+    button = re.search(r"<button[^>]*data-mic-toggle[^>]*>", html)
+    assert button is not None
+    assert "disabled" in button.group(0)
 
 
 def test_phrase_feed_returns_latest_room_phrases(client, owner):
