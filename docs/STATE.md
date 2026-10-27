@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A7 — вход студента: готов.**
+**A8 — RoomConsumer и presence: готов.**
 
 ## Что готово
 
@@ -62,6 +62,18 @@
   закрытая комната → 410.
 - **Rate limit (A7):** перебор ID ограничен через `django.core.cache`
   (`JOIN_RATE_LIMIT_ATTEMPTS`/`JOIN_RATE_LIMIT_WINDOW` на IP), при превышении 429.
+- **RoomConsumer (A8):** `WS /ws/rooms/<code>/`, группа `room_<id>`. `connect()`
+  проверяет, что комната открыта и код верный, и что у гостя есть сессия с именем
+  (или это владелец комнаты/админ). Коды закрытия: 4401 нет сессии, 4403 нет
+  доступа или комната закрыта.
+- **Presence (A8):** участники комнаты в `rooms/presence.py` (кэш Django с TTL),
+  учёт нескольких вкладок по счётчику; изменения рассылаются событием `presence`.
+- **Ping/pong (заготовка A11):** `{type: ping}` → `{type: pong}`, продлевает TTL.
+- **ASGI:** `AuthMiddlewareStack` кладёт в scope сессию Django и пользователя —
+  без этого `connect()` не видит гостевую сессию.
+- **Клиент комнаты (A8):** `frontend/room-socket.ts` подключается к WebSocket,
+  рисует список участников и статус соединения, шлёт `ping` раз в 20 с, не
+  переподключается на 4401/4403.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -84,8 +96,9 @@
 | Вход по ID (форма главной) | `POST /` → `config.views.home` |
 | Вход студента по ссылке/QR | `GET/POST /r/<code>/` → `rooms.views.room_join` |
 | Комната студента | `GET /r/<code>/live/` → `rooms.views.room_student` |
+| WebSocket комнаты | `WS /ws/rooms/<code>/` → `rooms.consumers.RoomConsumer` |
 | Админка | `GET /admin/` |
-| WebSocket (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
+| WebSocket-эхо (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
 | WSGI-приложение | `config.wsgi:application` |
 | JS-точка входа | `frontend/main.ts` → `{% vite_asset 'frontend/main.ts' %}` |
@@ -112,7 +125,8 @@
   среди открытых комнат, повторное использование после закрытия, идемпотентное
   закрытие, повторы сервиса при коллизии, QR и ссылка `/r/<code>/`, страницы
   создания/просмотра комнаты, доступ по ролям, JSON API создания, вход студента
-  (гостевая сессия, 404/410/429, name-валидация), rate limit и модель участника.
+  (гостевая сессия, 404/410/429, name-валидация), rate limit, модель участника,
+  `RoomConsumer` (изоляция комнат, 4401/4403, presence, второй участник, ping/pong).
 - Тесты WebSocket синхронные: сценарий целиком выполняется в `asyncio.run`,
   `CHANNEL_LAYERS` на время теста подменяется на in-memory через `settings`.
 
@@ -151,25 +165,28 @@
   (Redis при `REDIS_URL`), presence появится на A8 через channel layer.
 - `make test` запускается без `REDIS_URL`, поэтому тесты используют локальный кэш
   и in-memory channel layer и не требуют Redis на хосте.
+- Presence хранится в кэше (`rooms/presence.py`) как словарь соединений комнаты с
+  TTL, а не в отдельном Redis-множестве: так одна абстракция работает и с Redis, и
+  с локальным кэшем. Участник онлайн, пока у него есть хотя бы одна вкладка
+  (`count > 0`).
+- `RoomConsumer` не принимает `chat` и события фраз: это A9/A11. Сейчас он умеет
+  только `ping`/`pong` и рассылку `presence`.
 
-## Проверка A7
+## Проверка A8
 
 ```bash
-make check          # ruff + tsc + vite build + 79 тестов — зелёный
-make up && make migrate
-# главная: ввод ID → /r/<code>/ → ввод имени → /r/<code>/live/
+make check          # ruff + tsc + vite build + 88 тестов — зелёный
 ```
 
-Проверено вручную: `POST /` с ID (в нижнем регистре) редиректит на `/r/<code>/`;
-страница входа просит имя; после отправки имени создаётся `Participant` с
-`guest_name` и `session_key`, а `/r/<code>/live/` показывает имя. Неверный ID даёт
-404, закрытая комната — 410, превышение лимита попыток — 429. Rate limit проверен
-и на Redis (`redis://127.0.0.1:6380`), и на локальном кэше.
+Тесты `WebsocketCommunicator` проверяют: гость с сессией подключается и получает
+`presence`; без сессии — 4401; неизвестная или закрытая комната — 4403; два гостя
+видят друг друга; владелец подключается как не-гость; presence очищается после
+отключения; `ping` → `pong`; гость одной комнаты не проходит в другую. Проверено
+вручную на in-memory и на Redis-кэше.
 
 ## Дальше
 
-**A8 — `RoomConsumer`:** проверка кода и сессии в `connect()`, группа `room_<id>`,
-presence в Redis, событие `presence`. Критерий: без валидного кода соединение
-закрывается, два клиента видят друг друга, чужая комната недоступна. Читать:
-`docs/spec/ws-events.md`, `docs/spec/requirements.md` (раздел 3.1),
-`docs/spec/db-schema.md`.
+**A9 — чат:** модель `Message`, история, событие `chat_message`, интерфейс
+преподавателя и студента, догрузка по `last_message_id` при переподключении.
+Критерий: тесты consumer и views. Читать: `docs/spec/ws-events.md`,
+`docs/spec/requirements.md` (раздел 3.1), `docs/spec/db-schema.md`.

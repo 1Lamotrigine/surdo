@@ -15,14 +15,19 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 # consumer'ы могут обращаться к моделям и app registry.
 django_asgi_application = get_asgi_application()
 
+from channels.auth import AuthMiddlewareStack  # noqa: E402
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E402
 
 from config.routing import websocket_urlpatterns  # noqa: E402
 
+# AuthMiddlewareStack кладёт в scope сессию Django и пользователя: consumer
+# проверяет гостевую сессию студента и роль преподавателя в connect().
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_application,
-        "websocket": AllowedHostsOriginValidator(URLRouter(websocket_urlpatterns)),
+        "websocket": AllowedHostsOriginValidator(
+            AuthMiddlewareStack(URLRouter(websocket_urlpatterns))
+        ),
     }
 )

@@ -9,7 +9,7 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: "manifest.json",
     rollupOptions: {
-      input: ["frontend/main.ts", "frontend/rooms.ts"],
+      input: ["frontend/main.ts", "frontend/rooms.ts", "frontend/room-socket.ts"],
     },
   },
   server: {

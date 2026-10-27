@@ -112,3 +112,6 @@ def test_live_shows_guest_after_join(client, open_room):
     assert response.status_code == 200
     assert "Гость" in html
     assert open_room.title in html
+    # Страница готовит WebSocket-клиент комнаты (A8).
+    assert f'data-join-code="{OPEN_ROOM_CODE}"' in html
+    assert "data-presence-list" in html
