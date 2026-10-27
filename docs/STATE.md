@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**D2 — запись клипа: готов.**
+**D3 — предпросмотр на аватаре и сохранение черновика: готов.**
 
 ## Что готово
 
@@ -378,6 +378,19 @@
   кнопки старт/стоп, таймер, автолимит по `CLIP_MAX_FRAMES`, ползунки обрезки,
   сборка и контрольная распаковка, скачивание `.json.gz`. Лимиты кадров и
   размера передаются из настроек Django.
+- **Предпросмотр на аватаре (D3):** после сборки `frontend/record-page.ts`
+  лениво создаёт `Avatar` и загружает `AVATAR_MODEL_URL` (если он задан), а
+  затем проигрывает клип через `ClipPlayer` с `smoothing: false` — клип уже
+  сглажен One Euro на D2, повторное сглаживание только добавило бы лаг. На
+  странице есть «Играть» и «Стоп». Модель не скачивается, пока нет записанного
+  клипа; ошибка модели или WebGL показывается предупреждением и не мешает
+  сохранению черновика.
+- **Сохранение черновика (D3):** `frontend/sign-draft.ts` нормализует глоссу и
+  описание, проверяет язык по `Language.choices`, собирает
+  `multipart/form-data` и отправляет `POST /api/signs/` с CSRF-заголовком.
+  `record-page.ts` блокирует повторную отправку, показывает текст ошибки API и
+  после успеха открывает персоналу ссылку в Django Admin. Жест создаётся со
+  статусом `draft` и виден в `/admin/dictionary/sign/`.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -411,7 +424,7 @@
 | Очередь на проверке | `GET /dictionary/review/` → `dictionary.views.review_queue` |
 | Карточка жеста (решение) | `GET/POST /dictionary/review/<id>/` → `dictionary.views.review_sign` |
 | Очередь нераспознанных слов | `GET /dictionary/queue/` → `dictionary.views.unknown_queue` |
-| Запись жеста с камеры (D1–D2) | `GET /dictionary/record/` → `dictionary.views.record_gesture` |
+| Запись жеста с камеры (D1–D3) | `GET /dictionary/record/` → `dictionary.views.record_gesture` |
 | Действие со словом очереди | `POST /dictionary/queue/<id>/action/` → `dictionary.views.unknown_word_action` |
 | Закрыть комнату | `POST /rooms/<code>/close/` → `rooms.views.room_close` |
 | Сменить ID комнаты | `POST /rooms/<code>/rotate-code/` → `rooms.views.room_rotate_code` |
@@ -433,6 +446,7 @@
 | JS уведомлений и Wake Lock (C8) | `frontend/notifications.ts` (`notificationKindFor`, `vibrate`, `ScreenWakeLock`, `ScreenNotifier`) |
 | JS MediaPipe и скелета (D1) | `frontend/holistic.ts` (`HolisticDetector`, `normalizeHolisticResult`), `frontend/skeleton.ts`, `frontend/record-page.ts` |
 | JS записи и упаковки клипа (D2) | `frontend/clip-record.ts` (`encodeRecordedClip`, `autoTrimRange`, `resampleCapturedFrames`), `frontend/clip-encode.ts` (`encodeClipPayload`, `packClipFile`) |
+| JS сохранения черновика (D3) | `frontend/sign-draft.ts` (`validateSignDraft`, `submitSignDraft`), форма в `frontend/record-page.ts` |
 
 ## Клиент: режимы
 
@@ -454,15 +468,19 @@
   подсказка при пустой модели; поля настроек студента (C7).
 - `rooms/tests/test_join.py` — вход студента и страница комнаты; разметка
   уведомлений и Wake Lock (C8).
-- `dictionary/tests/test_record_page.py` — страница D1–D2: вход, роли словаря,
-  разметка камеры/холста/кнопок, передача модели и пути WASM, элементы записи и
-  обрезки, лимиты клипа из настроек, ссылка из очереди нераспознанных слов.
+- `dictionary/tests/test_record_page.py` — страница D1–D3: вход, роли словаря,
+  разметка камеры/холста/кнопок, передача моделей Holistic и аватара, пути WASM,
+  элементы записи, обрезки, предпросмотра и формы метаданных, лимиты клипа из
+  настроек, ссылка из очереди нераспознанных слов.
 - `frontend/clip-record.test.ts` (vitest) — конвейер D2: автообрезка, границы
   ручного диапазона, пересэмплирование на 30 FPS, добор частей скелета,
   сглаживание, лимит кадров, упаковка → распаковка C2, ретаргет без NaN.
 - `frontend/clip-encode.test.ts` (vitest) — Float16 (известные биты, ноль,
   субнормальное, бесконечность), base64, gzip, payload версии 1, проверка
   размера данных и чтение `.json.gz` декодером C2.
+- `frontend/sign-draft.test.ts` (vitest) — D3: нормализация глоссы и описания,
+  проверка обязательной глоссы/длины/языка, multipart-поля и CSRF-заголовок,
+  текст ошибки API, отказ на ответ без номера созданного жеста.
 - `frontend/holistic.test.ts` (vitest) — разбор ответа MediaPipe: вложенные и
   плоские наборы, мусор, пустой кадр, определение кистей.
 - `frontend/skeleton.test.ts` (vitest) — геометрия предпросмотра: `object-fit:
@@ -583,7 +601,8 @@
   языка, битого (400) и слишком большого (413) клипа; решение эксперта
   (`/review/`): права (аноним 401, редактор/преподаватель 403), утверждение и
   отклонение, JSON и форма, неверное решение (400), запрещённый переход (409),
-  неизвестный жест (404), версия словаря.
+  неизвестный жест (404), версия словаря; созданный черновик виден в Django
+  Admin.
 - `rooms/tests/test_management.py` — сервисные функции и HTTP-действия A10:
   смена ID (включая повтор при коллизии и недействительность старого кода),
   закрытие (идемпотентность, очистка presence), удаление участника (presence,
@@ -1037,12 +1056,53 @@ MediaPipe проверяются в браузере: vitest работает б
 - На D2 клип только скачивается; предпросмотр на аватаре, форма метаданных и
   сохранение черновика через API — следующий этап D3.
 
+## Проверка D3
+
+```bash
+make check          # ruff + tsc + vitest (249) + pytest (354) + vite build — зелёный
+```
+
+Автотесты покрывают метаданные и multipart-запрос к API
+(`frontend/sign-draft.test.ts`), разметку аватара/формы и передачу
+`AVATAR_MODEL_URL` (`dictionary/tests/test_record_page.py`), а также появление
+созданного черновика в списке Django Admin (`dictionary/tests/test_api.py`).
+Ручная проверка: войти редактором, открыть `/dictionary/queue/` и нажать
+«Записать жест с камеры», записать короткий жест и дождаться сборки. В блоке
+D3 загрузится VRM из `AVATAR_MODEL_URL`; «Играть» повторяет клип на аватаре,
+«Стоп» возвращает нейтральную позу. Заполнить глоссу (например, `УЧЕБНИК`),
+язык и описание, нажать «Сохранить черновик» — появится номер черновика, а под
+администратором он будет виден в `/admin/dictionary/sign/` со статусом
+«Черновик». Без `AVATAR_MODEL_URL` предпросмотр показывает предупреждение, но
+сохранение работает. Реальная камера, WebGL и VRM проверяются в браузере:
+vitest работает без DOM.
+
+## Решения D3
+
+- Новый backend-эндпоинт не понадобился: `POST /api/signs/` уже создаёт
+  `Sign` со статусом `draft` и принимает multipart с клипом. D3 добавляет
+  клиентскую проверку и форму, а не второй контракт.
+- Аватар грузится лениво, только после первой успешной сборки клипа: страница
+  записи не должна скачивать VRM и поднимать WebGL, пока редактор только
+  настраивает камеру. Ошибка VRM/WebGL не блокирует сохранение — это
+  вспомогательный предпросмотр, а не условие черновика.
+- `ClipPlayer` запускается с `smoothing: false`: D2 уже применил One Euro к
+  кадрам, поэтому повторное сглаживание на предпросмотре только увеличило бы
+  задержку и расхождение с сохранённым клипом.
+- После успешного сохранения поля и кнопка блокируются, чтобы случайно не
+  создать дубликат: API не имеет обновления черновика. Новая запись или
+  изменение обрезки сбрасывают это состояние. Языки берутся из
+  `Language.choices`, а не дублируются в шаблоне.
+- Валидация вынесена в `frontend/sign-draft.ts` без DOM, поэтому правила
+  глоссы и формата запроса проверяются vitest; страница остаётся слоем
+  взаимодействия.
+
 ## Дальше
 
-**D2 готов.** Следующий — D3: предпросмотр записанного клипа на аватаре, форма
-метаданных и сохранение черновика через `POST /api/signs/`. Читать:
-`docs/spec/clip-format.md`, `docs/spec/api.md`, `docs/spec/requirements.md`
-(3.5), `frontend/clip-player.ts`, `frontend/record-page.ts`.
+**D3 готов.** Следующий — D4: запись жеста из очереди нераспознанных слов,
+чтобы слово получало статус `recorded`. Читать: `dictionary/queue.py`,
+`dictionary/services.py` (`mark_unknown_word_recorded`), страницу
+`/dictionary/queue/`, `frontend/record-page.ts` и `docs/spec/requirements.md`
+(FR-17–FR-19).
 
 
 Пополнение очереди из реальных занятий подключается в блоке **E**

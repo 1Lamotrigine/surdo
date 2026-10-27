@@ -73,6 +73,21 @@ def test_record_page_renders_camera_and_skeleton(client, editor):
     assert "data-record-trim-end" in html
     assert "data-record-build-status" in html
     assert "data-record-download" in html
+    # D3: аватар, метаданные и сохранение черновика через API.
+    assert "data-record-preview" in html
+    assert "data-record-preview-stage" in html
+    assert "data-record-preview-play" in html
+    assert "data-record-preview-stop" in html
+    assert "data-sign-form" in html
+    assert 'data-sign-api-url="/api/signs/"' in html
+    assert "data-sign-gloss" in html
+    assert "data-sign-lang" in html
+    assert "data-sign-description" in html
+    assert "data-sign-save" in html
+    assert "data-sign-status" in html
+    assert "csrfmiddlewaretoken" in html
+    assert '<option value="rsl">Русский жестовый</option>' in html
+    assert '<option value="ksl">Казахский жестовый</option>' in html
     assert "record-page" in html
 
 
@@ -87,6 +102,17 @@ def test_record_page_passes_model_url(client, editor):
     assert "Не задан URL модели Holistic" not in html
 
 
+@override_settings(AVATAR_MODEL_URL="https://example.test/avatar.vrm")
+def test_record_page_passes_avatar_model_url(client, editor):
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"))
+    html = response.content.decode()
+
+    assert 'data-avatar-model-url="https://example.test/avatar.vrm"' in html
+    assert "Модель аватара не задана" not in html
+
+
 @override_settings(MEDIAPIPE_HOLISTIC_MODEL_URL="")
 def test_record_page_without_model_shows_hint(client, editor):
     client.force_login(editor)
@@ -96,6 +122,18 @@ def test_record_page_without_model_shows_hint(client, editor):
 
     assert 'data-mediapipe-model-url=""' in html
     assert "Не задан URL модели Holistic" in html
+
+
+@override_settings(AVATAR_MODEL_URL="")
+def test_record_page_without_avatar_model_still_allows_save(client, editor):
+    client.force_login(editor)
+
+    response = client.get(reverse("dictionary:record"))
+    html = response.content.decode()
+
+    assert 'data-avatar-model-url=""' in html
+    assert "Модель аватара не задана" in html
+    assert "data-sign-save" in html
 
 
 def test_record_page_uses_built_wasm(client, editor):

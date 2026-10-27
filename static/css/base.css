@@ -1656,3 +1656,135 @@ button:focus-visible {
 .record-trim .button {
   margin-top: 0.75rem;
 }
+
+/* D3: предпросмотр на аватаре и сохранение черновика */
+.record-preview {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.record-preview h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.record-preview > p {
+  color: var(--muted);
+}
+
+.record-preview-warning {
+  padding: 0.75rem 1rem;
+  border-left: 3px solid #d97706;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e !important;
+}
+
+.record-preview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 0.45fr);
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.record-preview-stage {
+  position: relative;
+  min-height: 22rem;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: #111827;
+}
+
+.record-preview-stage canvas {
+  display: block;
+}
+
+.record-preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 1.5rem;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+.record-preview-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.record-preview-side .record-actions {
+  margin: 0;
+}
+
+.record-preview-status,
+.record-save-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.record-preview-status[data-state="running"],
+.record-save-status[data-state="running"] {
+  color: #166534;
+}
+
+.record-preview-status[data-state="warning"],
+.record-save-status[data-state="warning"] {
+  color: #92400e;
+}
+
+.record-preview-status[data-state="error"],
+.record-save-status[data-state="error"] {
+  color: #991b1b;
+}
+
+.record-save {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.record-save h2 {
+  margin-bottom: 0.5rem;
+}
+
+.record-save > p {
+  color: var(--muted);
+}
+
+.record-save-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.record-save-description {
+  grid-column: 1 / -1;
+}
+
+.record-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+@media (max-width: 760px) {
+  .record-preview-grid,
+  .record-save-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .record-preview-stage {
+    min-height: 18rem;
+  }
+}

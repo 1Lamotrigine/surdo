@@ -308,6 +308,22 @@ def test_create_sign_rejects_oversized_file(client, editor, settings, tmp_path):
     assert Sign.objects.count() == 0
 
 
+def test_created_draft_appears_in_admin(client, editor, admin_user):
+    client.force_login(editor)
+    created = client.post(
+        reverse("api-sign-create"),
+        data=json.dumps({"gloss": "УЧЕБНИК", "lang": Language.RSL}),
+        content_type="application/json",
+    )
+    assert created.status_code == 201
+
+    client.force_login(admin_user)
+    response = client.get(reverse("admin:dictionary_sign_changelist"))
+
+    assert response.status_code == 200
+    assert "УЧЕБНИК" in response.content.decode()
+
+
 def test_expert_can_create_sign(client, expert, settings, tmp_path):
     settings.MEDIA_ROOT = tmp_path
     client.force_login(expert)

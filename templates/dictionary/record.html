@@ -10,9 +10,10 @@
            data-mediapipe-model-url="{{ model_url }}"
            data-record-fps="{{ fps }}"
            data-record-max-frames="{{ max_frames }}"
-           data-record-max-bytes="{{ max_bytes }}">
+           data-record-max-bytes="{{ max_bytes }}"
+           data-avatar-model-url="{{ avatar_model_url }}">
     <header class="record-head">
-      <p class="eyebrow">Редактор словаря · этап D2</p>
+      <p class="eyebrow">Редактор словаря · этап D3</p>
       <h1>Запись жеста с камеры</h1>
       <p class="lead">
         Включите камеру и встаньте так, чтобы в кадр попали лицо, корпус и обе
@@ -61,7 +62,7 @@
     </dl>
 
     <section class="record-trim" data-record-trim hidden aria-labelledby="record-trim-title">
-      <h2 id="record-trim-title">Обрезка и файл клипа (D2)</h2>
+      <h2 id="record-trim-title">Обрезка и файл клипа</h2>
       <p>
         Края записи обрезаны автоматически по появлению позы и кистей. Ползунками
         можно оставить только нужный фрагмент: клип пересобирается сразу,
@@ -83,6 +84,81 @@
         Клип ещё не собран.
       </p>
       <a class="button" data-record-download hidden download>Скачать клип (.json.gz)</a>
+    </section>
+
+    <section class="record-preview" data-record-preview hidden aria-labelledby="record-preview-title">
+      <h2 id="record-preview-title">Предпросмотр на аватаре и сохранение (D3)</h2>
+      <p>
+        Собранный клип загружается в аватар тем же ретаргетом, что и в комнате.
+        Если что-то не так, вернитесь к ползункам обрезки и запишите заново.
+      </p>
+      {% if not avatar_model_url %}
+        <p class="record-preview-warning">
+          Модель аватара не задана (<code>AVATAR_MODEL_URL</code>), поэтому
+          предпросмотр недоступен. Клип всё равно можно сохранить в словарь.
+        </p>
+      {% endif %}
+      <div class="record-preview-grid">
+        <div class="record-preview-stage" data-record-preview-stage>
+          <p class="record-preview-placeholder" data-record-preview-placeholder>
+            Модель аватара появится здесь после сборки клипа.
+          </p>
+        </div>
+        <div class="record-preview-side">
+          <p class="record-preview-status" data-record-preview-status data-state="idle" aria-live="polite">
+            Клип ещё не собран.
+          </p>
+          <div class="record-actions">
+            <button class="button" type="button" data-record-preview-play disabled>Играть</button>
+            <button class="button button-secondary" type="button" data-record-preview-stop disabled>
+              Стоп
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <form class="record-save" data-sign-form
+            data-sign-api-url="{% url 'api-sign-create' %}" novalidate>
+        {% csrf_token %}
+        <h2>Метаданные жеста</h2>
+        <p>
+          Жест сохраняется как <strong>черновик</strong>: студентам он не
+          показывается, пока эксперт-носитель не проверит запись. После
+          сохранения черновик виден в Django Admin.
+        </p>
+        <div class="record-save-grid">
+          <label class="avatar-field">
+            <span>Глосса</span>
+            <input type="text" name="gloss" maxlength="100" autocomplete="off" required
+                   placeholder="Например, УЧЕБНИК" data-sign-gloss>
+          </label>
+          <label class="avatar-field">
+            <span>Язык</span>
+            <select name="lang" data-sign-lang>
+              {% for value, label in languages %}
+                <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="avatar-field record-save-description">
+            <span>Описание</span>
+            <textarea name="description" rows="3" data-sign-description
+                      placeholder="Контекст, диалект, комментарий для эксперта"></textarea>
+          </label>
+        </div>
+        <div class="record-save-actions">
+          <button class="button" type="submit" data-sign-save disabled>
+            Сохранить черновик
+          </button>
+          {% if user.is_staff %}
+            <a class="button button-secondary" data-sign-admin hidden
+               href="{% url 'admin:dictionary_sign_changelist' %}">Открыть в Django Admin</a>
+          {% endif %}
+        </div>
+        <p class="record-save-status" data-sign-status data-state="idle" aria-live="polite">
+          Сначала запишите и соберите клип.
+        </p>
+      </form>
     </section>
 
     <aside class="notice notice-warning">
@@ -107,6 +183,7 @@
         <li>Наклоните голову — контур лица и брови следуют за мимикой.</li>
         <li>Выйдите из кадра — предпросмотр остаётся, а строка показателей пишет, что человека нет.</li>
         <li>Запишите жест, подвиньте ползунки обрезки и скачайте файл: строка сборки должна подтвердить, что распаковка дала тот же клип.</li>
+        <li>Проиграйте клип на аватаре, заполните глоссу, язык и описание, сохраните черновик и проверьте его в Django Admin.</li>
       </ul>
     </aside>
   </section>

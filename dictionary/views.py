@@ -179,18 +179,20 @@ def unknown_word_action(request: HttpRequest, word_id: int):
 
 @dictionary_required
 def record_gesture(request: HttpRequest):
-    """Инструмент записи жеста (D1): камера и предпросмотр скелета MediaPipe.
+    """Инструмент записи жеста (D1–D3): камера, клип и сохранение черновика.
 
-    Пока это только просмотр: запись клипа, обрезка и отправка в API появятся
-    на этапах D2–D3. Страница доступна ролям словаря, как и остальные
-    инструменты редактора.
+    MediaPipe рисует скелет, D2 собирает клип, D3 даёт посмотреть его на
+    аватаре, заполнить метаданные и отправить в ``POST /api/signs/``. Страница
+    доступна ролям словаря, как и остальные инструменты редактора.
     """
     return render(
         request,
         "dictionary/record.html",
         {
             "model_url": settings.MEDIAPIPE_HOLISTIC_MODEL_URL,
+            "avatar_model_url": settings.AVATAR_MODEL_URL,
             "mediapipe_wasm_path": _mediapipe_wasm_path(),
+            "languages": Language.choices,
             "fps": settings.CLIP_DEFAULT_FPS,
             "max_frames": settings.CLIP_MAX_FRAMES,
             "max_bytes": settings.CLIP_MAX_SIZE_BYTES,

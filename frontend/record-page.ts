@@ -1,15 +1,18 @@
 /**
- * Инструмент записи жестов (D1 + D2): камера, предпросмотр скелета MediaPipe,
- * запись, обрезка и упаковка клипа в формат C2.
+ * Инструмент записи жестов (D1–D3): камера, скелет MediaPipe, запись, обрезка,
+ * упаковка клипа, предпросмотр на аватаре и сохранение черновика.
  *
  * Страница `GET /dictionary/record/` открывает камеру по кнопке и рисует поверх
  * видео позу, лицо и кисти. По кнопке «Начать запись» кадры складываются с
  * метками времени; после остановки пустые края обрезаются, кадры пересобираются
  * на 30 FPS, сглаживаются One Euro и упаковываются в `.json.gz`. Полученный
- * файл сразу распаковывается обратно — это проверка обратимости формата.
+ * файл сразу распаковывается обратно — это проверка обратимости формата. D3
+ * добавляет аватар и форму метаданных: жест уходит в API черновиком.
  */
 
-import { decodeClip } from "./clip";
+import { Avatar } from "./avatar";
+import { decodeClip, type DecodedClip } from "./clip";
+import { ClipPlayer } from "./clip-player";
 import {
   autoTrimRange,
   clampTrimRange,
@@ -22,6 +25,11 @@ import {
   framePointCount,
   handsDetected,
 } from "./holistic";
+import {
+  SIGN_LANGUAGES,
+  submitSignDraft,
+  validateSignDraft,
+} from "./sign-draft";
 import { drawSkeleton, type HolisticFrame, type Viewport } from "./skeleton";
 
 type StatusState = "idle" | "loading" | "running" | "warning" | "error";
@@ -76,11 +84,25 @@ function setupRecordPage(root: HTMLElement): void {
   const trimEndValue = root.querySelector<HTMLElement>("[data-record-trim-end-value]");
   const buildStatus = root.querySelector<HTMLElement>("[data-record-build-status]");
   const download = root.querySelector<HTMLAnchorElement>("[data-record-download]");
+  const previewSection = root.querySelector<HTMLElement>("[data-record-preview]");
+  const previewStage = root.querySelector<HTMLElement>("[data-record-preview-stage]");
+  const previewPlaceholder = root.querySelector<HTMLElement>("[data-record-preview-placeholder]");
+  const previewStatus = root.querySelector<HTMLElement>("[data-record-preview-status]");
+  const previewPlay = root.querySelector<HTMLButtonElement>("[data-record-preview-play]");
+  const previewStop = root.querySelector<HTMLButtonElement>("[data-record-preview-stop]");
+  const signForm = root.querySelector<HTMLFormElement>("[data-sign-form]");
+  const signGloss = root.querySelector<HTMLInputElement>("[data-sign-gloss]");
+  const signLang = root.querySelector<HTMLSelectElement>("[data-sign-lang]");
+  const signDescription = root.querySelector<HTMLTextAreaElement>("[data-sign-description]");
+  const signSave = root.querySelector<HTMLButtonElement>("[data-sign-save]");
+  const signStatus = root.querySelector<HTMLElement>("[data-sign-status]");
+  const signAdmin = root.querySelector<HTMLAnchorElement>("[data-sign-admin]");
   if (!video || !canvas) return;
 
   const context = canvas.getContext("2d");
   const wasmBasePath = root.dataset.mediapipeWasm?.trim() ?? "";
   const modelUrl = root.dataset.mediapipeModelUrl?.trim() ?? "";
+  const avatarModelUrl = root.dataset.avatarModelUrl?.trim() ?? "";
   const fps = positiveNumber(root.dataset.recordFps, 30);
   const maxFrames = Math.max(1, Math.round(positiveNumber(root.dataset.recordMaxFrames, 300)));
   const maxBytes = Math.max(1, positiveNumber(root.dataset.recordMaxBytes, 2 * 1024 * 1024));
@@ -110,6 +132,22 @@ function setupRecordPage(root: HTMLElement): void {
   let rebuildTimer = 0;
   let buildToken = 0;
   let downloadUrl: string | null = null;
+  let currentFile: Uint8Array | null = null;
+  let currentClipFrames = 0;
+  let clipBuilding = false;
+  let clipOversize = false;
+
+  // Предпросмотр на аватаре (D3): модель грузится лениво, только после клипа.
+  let previewAvatar: Avatar | null = null;
+  let previewPlayer: ClipPlayer | null = null;
+  let previewAvatarPromise: Promise<Avatar | null> | null = null;
+  let previewClip: DecodedClip | null = null;
+  let previewToken = 0;
+  let previewReady = false;
+
+  // Сохранение черновика (D3): после успеха дубликат не отправляем.
+  let savedSignId: number | null = null;
+  let savingDraft = false;
 
   const setStatus = (state: StatusState, detail?: string): void => {
     if (!status) return;
@@ -127,6 +165,57 @@ function setupRecordPage(root: HTMLElement): void {
     if (!buildStatus) return;
     buildStatus.dataset.state = state;
     buildStatus.textContent = text;
+  };
+
+  const setPreviewStatus = (state: StatusState, text: string): void => {
+    if (!previewStatus) return;
+    previewStatus.dataset.state = state;
+    previewStatus.textContent = text;
+  };
+
+  const setSignStatus = (state: StatusState, text: string): void => {
+    if (!signStatus) return;
+    signStatus.dataset.state = state;
+    signStatus.textContent = text;
+  };
+
+  const updatePreviewButtons = (): void => {
+    if (previewPlay) previewPlay.disabled = !previewReady;
+    if (previewStop) previewStop.disabled = !previewReady;
+  };
+
+  const updateSaveButton = (): void => {
+    if (!signSave) return;
+    const canSave =
+      currentFile !== null &&
+      !clipBuilding &&
+      !clipOversize &&
+      savedSignId === null &&
+      !savingDraft;
+    signSave.disabled = !canSave;
+    signSave.textContent =
+      savedSignId !== null
+        ? "Черновик сохранён"
+        : savingDraft
+          ? "Сохранение…"
+          : "Сохранить черновик";
+  };
+
+  const setDraftFieldsDisabled = (disabled: boolean): void => {
+    signForm
+      ?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        'input:not([type="hidden"]), select, textarea',
+      )
+      .forEach((field) => {
+        field.disabled = disabled;
+      });
+  };
+
+  const clearSavedDraft = (): void => {
+    savedSignId = null;
+    setDraftFieldsDisabled(false);
+    if (signAdmin) signAdmin.hidden = true;
+    updateSaveButton();
   };
 
   const updateButtons = (): void => {
@@ -232,9 +321,201 @@ function setupRecordPage(root: HTMLElement): void {
     }, 120);
   };
 
+  const resetPreview = (): void => {
+    previewToken += 1;
+    previewClip = null;
+    previewReady = false;
+    previewPlayer?.stop();
+    previewAvatar?.setNeutralPose();
+    updatePreviewButtons();
+  };
+
+  const ensurePreviewAvatar = (): Promise<Avatar | null> => {
+    if (!previewStage) return Promise.resolve(null);
+    if (!avatarModelUrl) {
+      setPreviewStatus(
+        "warning",
+        "Модель аватара не задана (AVATAR_MODEL_URL): предпросмотр недоступен, но клип можно сохранить.",
+      );
+      return Promise.resolve(null);
+    }
+    if (previewAvatar) return Promise.resolve(previewAvatar);
+    if (previewAvatarPromise) return previewAvatarPromise;
+
+    previewAvatarPromise = (async () => {
+      try {
+        previewPlaceholder?.remove();
+        const created = new Avatar({
+          container: previewStage,
+          onStatus: (state, detail) => {
+            if (state === "loading") {
+              setPreviewStatus("loading", detail ?? "Загрузка модели аватара…");
+            } else if (state === "error") {
+              setPreviewStatus(
+                "warning",
+                `Модель не загружена: ${detail ?? "неизвестная ошибка"}. Клип можно сохранить.`,
+              );
+            }
+          },
+        });
+        previewAvatar = created;
+        await created.load(avatarModelUrl);
+        return created;
+      } catch (error) {
+        setPreviewStatus(
+          "warning",
+          `Предпросмотр недоступен: ${errorMessage(error)}. Клип можно сохранить.`,
+        );
+        return null;
+      } finally {
+        previewAvatarPromise = null;
+      }
+    })();
+    return previewAvatarPromise;
+  };
+
+  const syncPreview = (): void => {
+    if (!previewAvatar?.model || !previewClip) {
+      previewReady = false;
+      updatePreviewButtons();
+      return;
+    }
+    if (!previewPlayer) {
+      previewPlayer = new ClipPlayer(previewAvatar.model, {
+        smoothing: false,
+        loop: false,
+        onEnd: () => {
+          setPreviewStatus("running", "Клип проигран. Нажмите «Играть», чтобы повторить.");
+        },
+      });
+    }
+    previewPlayer.load(previewClip);
+    previewReady = true;
+    updatePreviewButtons();
+    setPreviewStatus(
+      "running",
+      `Клип загружен на аватар: ${previewClip.frames} кадров, ` +
+        `${formatSeconds((previewClip.frames / previewClip.fps) * 1000)}. Нажмите «Играть».`,
+    );
+  };
+
+  const setPreviewClip = async (clip: DecodedClip | null): Promise<void> => {
+    previewClip = clip;
+    previewReady = false;
+    updatePreviewButtons();
+    if (!clip) {
+      setPreviewStatus("idle", "Клип ещё не собран.");
+      return;
+    }
+    if (!previewStage) return;
+    if (!avatarModelUrl) {
+      setPreviewStatus(
+        "warning",
+        "Модель аватара не задана: предпросмотр недоступен, но клип можно сохранить.",
+      );
+      return;
+    }
+
+    const token = ++previewToken;
+    setPreviewStatus("loading", "Клип готов. Загрузка модели аватара…");
+    const created = await ensurePreviewAvatar();
+    if (token !== previewToken) return;
+    if (!created?.model) {
+      previewReady = false;
+      updatePreviewButtons();
+      return;
+    }
+    try {
+      syncPreview();
+    } catch (error) {
+      previewReady = false;
+      updatePreviewButtons();
+      setPreviewStatus(
+        "warning",
+        `Предпросмотр не запустился: ${errorMessage(error)}. Клип можно сохранить.`,
+      );
+    }
+  };
+
+  const draftLanguages = signLang
+    ? Array.from(signLang.options)
+        .map((option) => option.value)
+        .filter((value) => value.length > 0)
+    : [];
+  const allowedLanguages = draftLanguages.length > 0 ? draftLanguages : SIGN_LANGUAGES;
+
+  const handleSignSubmit = async (event: SubmitEvent): Promise<void> => {
+    event.preventDefault();
+    const file = currentFile;
+    if (!file) {
+      setSignStatus("error", "Сначала запишите и соберите клип.");
+      return;
+    }
+    if (savedSignId !== null || savingDraft) return;
+
+    const validation = validateSignDraft(
+      {
+        gloss: signGloss?.value ?? "",
+        lang: signLang?.value ?? "rsl",
+        description: signDescription?.value ?? "",
+      },
+      allowedLanguages,
+    );
+    if (!validation.valid) {
+      const messages = Object.values(validation.errors).filter(
+        (value): value is string => typeof value === "string",
+      );
+      setSignStatus("error", messages.join(" "));
+      return;
+    }
+    if (signGloss) signGloss.value = validation.draft.gloss;
+    if (signDescription) signDescription.value = validation.draft.description;
+
+    const csrf =
+      signForm?.querySelector<HTMLInputElement>('input[name="csrfmiddlewaretoken"]')?.value ?? "";
+    if (!csrf) {
+      setSignStatus("error", "Не найден CSRF-токен формы. Обновите страницу.");
+      return;
+    }
+
+    savingDraft = true;
+    updateSaveButton();
+    setSignStatus("loading", "Сохранение черновика…");
+    try {
+      const payload = await submitSignDraft({
+        url: signForm?.dataset.signApiUrl || "/api/signs/",
+        csrfToken: csrf,
+        draft: validation.draft,
+        file: new Blob([file as BlobPart], { type: "application/gzip" }),
+        filename: `zapis-${currentClipFrames}f.json.gz`,
+      });
+      savedSignId = payload.id;
+      setDraftFieldsDisabled(true);
+      if (signAdmin) signAdmin.hidden = false;
+      setSignStatus(
+        "running",
+        `Черновик №${payload.id} «${payload.gloss}» сохранён. Он появится в Django Admin.`,
+      );
+    } catch (error) {
+      setSignStatus("error", `Не удалось сохранить: ${errorMessage(error)}`);
+    } finally {
+      savingDraft = false;
+      updateSaveButton();
+    }
+  };
+
   const rebuildClip = async (): Promise<void> => {
     if (!trimRange || recordedFrames.length === 0) return;
     const token = ++buildToken;
+    clipBuilding = true;
+    currentFile = null;
+    currentClipFrames = 0;
+    clipOversize = false;
+    clearSavedDraft();
+    resetPreview();
+    revokeDownload();
+    updateSaveButton();
+    setSignStatus("loading", "Сборка клипа…");
     setBuildStatus("loading", "Сборка клипа: Float16, gzip и проверка распаковкой…");
 
     try {
@@ -252,8 +533,12 @@ function setupRecordPage(root: HTMLElement): void {
       if (decoded.frames !== result.frameCount) {
         throw new Error(`распаковка дала ${decoded.frames} кадров вместо ${result.frameCount}.`);
       }
+      if (token !== buildToken) return;
 
-      revokeDownload();
+      currentFile = result.file;
+      currentClipFrames = result.frameCount;
+      clipOversize = result.file.byteLength > maxBytes;
+
       downloadUrl = URL.createObjectURL(
         new Blob([result.file as BlobPart], { type: "application/gzip" }),
       );
@@ -262,22 +547,39 @@ function setupRecordPage(root: HTMLElement): void {
         download.download = `zapis-${result.frameCount}f.json.gz`;
         download.hidden = false;
       }
+      if (previewSection) previewSection.hidden = false;
 
       const summary =
         `${result.frameCount} кадров, ${formatSeconds(result.durationMs)}, ` +
         `${formatSize(result.file.byteLength)}.`;
       const verified = `Распаковка: формат v${decoded.version}, ${decoded.points} точек — совпадает.`;
-      if (result.file.byteLength > maxBytes) {
+      if (clipOversize) {
         setBuildStatus(
           "warning",
           `${summary} ${verified} Файл больше лимита ${formatSize(maxBytes)}: сократите жест.`,
         );
+        setSignStatus(
+          "warning",
+          `Клип больше лимита ${formatSize(maxBytes)}: уменьшите длительность, чтобы сохранить.`,
+        );
       } else {
         setBuildStatus("running", `${summary} ${verified}`);
+        setSignStatus("idle", "Клип готов. Заполните метаданные и сохраните черновик.");
       }
+
+      void setPreviewClip(decoded);
     } catch (error) {
       if (token === buildToken) {
+        currentFile = null;
+        currentClipFrames = 0;
+        clipOversize = false;
         setBuildStatus("error", `Не удалось собрать клип: ${errorMessage(error)}`);
+        setSignStatus("error", "Клип не собран — сохранить черновик нельзя.");
+      }
+    } finally {
+      if (token === buildToken) {
+        clipBuilding = false;
+        updateSaveButton();
       }
     }
   };
@@ -332,6 +634,7 @@ function setupRecordPage(root: HTMLElement): void {
 
     if (frames.length === 0) {
       setClipStatus("error", "Кадров не записано: включите камеру и начните заново.");
+      setSignStatus("error", "Нет записи — сохранить черновик нельзя.");
       return;
     }
 
@@ -340,10 +643,12 @@ function setupRecordPage(root: HTMLElement): void {
     if (!range) {
       trimRange = null;
       if (trimSection) trimSection.hidden = true;
+      if (previewSection) previewSection.hidden = true;
       setClipStatus(
         "error",
         "В записи не было позы или кистей. Встаньте в кадр целиком и повторите.",
       );
+      setSignStatus("error", "Клип не собран — сохранить черновик нельзя.");
       return;
     }
 
@@ -365,12 +670,21 @@ function setupRecordPage(root: HTMLElement): void {
       rebuildTimer = 0;
     }
     buildToken += 1;
+    clipBuilding = false;
+    currentFile = null;
+    currentClipFrames = 0;
+    clipOversize = false;
+    clearSavedDraft();
+    resetPreview();
     revokeDownload();
     recordedFrames = [];
     recordingFrames = [];
     trimRange = null;
     if (trimSection) trimSection.hidden = true;
+    if (previewSection) previewSection.hidden = true;
     setBuildStatus("idle", "Клип ещё не собран.");
+    setSignStatus("idle", "Сначала запишите и соберите клип.");
+    updateSaveButton();
     recording = true;
     recordingStartedAt = performance.now();
     lastCaptureAt = -1;
@@ -537,6 +851,20 @@ function setupRecordPage(root: HTMLElement): void {
   trimStart?.addEventListener("input", onTrimInput);
   trimEnd?.addEventListener("input", onTrimInput);
 
+  previewPlay?.addEventListener("click", () => {
+    if (!previewReady || !previewPlayer) return;
+    previewPlayer.start();
+    setPreviewStatus("running", "Воспроизведение клипа на аватаре…");
+  });
+  previewStop?.addEventListener("click", () => {
+    previewPlayer?.stop();
+    previewAvatar?.setNeutralPose();
+    setPreviewStatus("idle", "Остановлено. Можно сыграть ещё раз.");
+  });
+  signForm?.addEventListener("submit", (event) => {
+    void handleSignSubmit(event);
+  });
+
   // Поворот телефона или изменение размера окна: холст должен совпасть с видео.
   window.addEventListener("resize", render);
 
@@ -548,6 +876,10 @@ function setupRecordPage(root: HTMLElement): void {
       buildToken += 1;
       stopCamera(false);
       revokeDownload();
+      previewPlayer?.dispose();
+      previewPlayer = null;
+      previewAvatar?.dispose();
+      previewAvatar = null;
       detector?.dispose();
       detector = null;
       window.removeEventListener("resize", render);
@@ -556,7 +888,11 @@ function setupRecordPage(root: HTMLElement): void {
   );
 
   updateButtons();
+  updatePreviewButtons();
+  updateSaveButton();
   setBuildStatus("idle", "Клип ещё не собран.");
+  setPreviewStatus("idle", "Клип ещё не собран.");
+  setSignStatus("idle", "Сначала запишите и соберите клип.");
   if (timer) timer.textContent = `0.00 с / ${formatSeconds(maxDurationMs)}`;
 }
 
