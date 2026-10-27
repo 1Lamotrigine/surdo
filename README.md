@@ -17,7 +17,7 @@
 ```bash
 cp .env.example .env     # при необходимости поменяйте пароль и SECRET_KEY
 make setup               # venv, Python- и npm-зависимости
-make check               # ruff + tsc + vite build + pytest (поднимает контейнер db)
+make check               # ruff + tsc + vitest + vite build + pytest (поднимает контейнер db)
 docker compose up --build -d
 docker compose exec web python manage.py migrate
 docker compose exec web python manage.py seed_admin
@@ -88,7 +88,7 @@ make up                  # страница подключает модуль с
 ```
 
 `make client-build` пересобирает `static/dist`, `make client-typecheck` проверяет
-TypeScript.
+TypeScript, `make client-test` гоняет тесты клиента (vitest).
 
 ## Структура
 
@@ -109,12 +109,13 @@ TypeScript.
 ## Команды
 
 ```bash
-make check            # ruff + tsc + vite build + pytest
+make check            # ruff + tsc + vitest + vite build + pytest
 make lint             # только ruff
 make test             # vite build + только pytest
 make client-dev       # Vite dev-сервер с HMR
 make client-build     # production-сборка клиента
 make client-typecheck # проверка TypeScript
+make client-test      # тесты клиента (vitest)
 make up               # docker compose up --build
 make down             # остановить стек
 make migrate          # применить миграции

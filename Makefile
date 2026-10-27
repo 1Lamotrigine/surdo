@@ -8,11 +8,11 @@ DB_PASSWORD ?= change-me
 -include .env
 export
 
-.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-dev
+.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-test client-dev
 
 help:
 	@echo "make setup           — .env, venv, Python- и npm-зависимости"
-	@echo "make check           — ruff + tsc + pytest + vite build"
+	@echo "make check           — ruff + tsc + vitest + pytest + vite build"
 	@echo "make up              — собрать и запустить весь стек (web, db, redis, caddy)"
 	@echo "make down            — остановить стек"
 	@echo "make migrate         — применить миграции"
@@ -21,11 +21,12 @@ help:
 	@echo "make client-dev      — Vite dev-сервер с HMR на :5173"
 	@echo "make client-build    — production-сборка в static/dist"
 	@echo "make client-typecheck — проверка TypeScript"
+	@echo "make client-test     — тесты клиента (vitest)"
 
 .env:
 	cp .env.example .env
 
-check: .env lint client-typecheck test
+check: .env lint client-typecheck client-test test
 
 lint:
 	@test -x $(PYTHON) || { echo "Нет $(PYTHON). Выполните: make setup"; exit 1; }
@@ -57,6 +58,9 @@ client-build: node_modules
 
 client-typecheck: node_modules
 	$(NPM) run typecheck
+
+client-test: node_modules
+	$(NPM) test
 
 client-dev: node_modules
 	$(NPM) run dev

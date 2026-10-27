@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**C1 — JS-модуль аватара: готов.**
+**C2 — декодер формата клипа: готов.**
 
 ## Что готово
 
@@ -216,8 +216,23 @@
   загрузки, поле для URL модели и загрузка по кнопке. URL модели берётся из
   поля или из настройки `AVATAR_MODEL_URL` (`.env`); без модели сцена, камера и
   свет работают, а страница показывает подсказку.
+- **Декодер клипа (C2):** `frontend/clip.ts` — чистая функция
+  `decodeClip(ArrayBuffer|Uint8Array)`: `.json.gz` → `gzip` (`DecompressionStream`)
+  → `JSON` → `base64` → `Float16` → `Float32Array`. Также
+  `decodeClipPayload(payload)` (готовый объект), хелперы `base64ToBytes`,
+  `gunzip`, `readFloat16`, `float16ToFloat32`, `pointAt`, константа
+  `CLIP_VERSION` и ошибка `ClipDecodeError`. Разбор проверяет версию, `fps`,
+  целые `frames`, непустой `layout` с положительными частями, непустые `data` и
+  совпадение размера (`frames × points × 3`). `layout` превращается в `offsets`
+  (смещения частей — для ретаргета C3).
+- **Тесты клиента (C2):** `frontend/clip.test.ts` (vitest, окружение Node) на
+  фикстуре `frontend/clip.fixture.ts` — настоящий файл формата (Float16 → gzip →
+  base64 → JSON → `.json.gz`). Проверяются Float16 (эталонные биты, ноль,
+  субнормальные, NaN/бесконечность), base64, gunzip, разбор `layout`/смещений,
+  значения по кадрам, `pointAt`, все ветки ошибок. `npm test` подключён к
+  `make check` (`client-test`).
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
-  `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
+  `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
 - `AGENTS.md`, `.env.example`, `.dockerignore`, `.gitignore`, `README.md`.
 - `docs/spec/` — 12 выжимок из ТЗ по разделам.
@@ -261,6 +276,7 @@
 | JS-точка входа | `frontend/main.ts` → `{% vite_asset 'frontend/main.ts' %}` |
 | JS страницы комнаты | `frontend/rooms.ts` → крупный режим и копирование ссылки |
 | JS аватара (C1) | `frontend/avatar.ts` (класс `Avatar`), `frontend/avatar-page.ts` (страница) |
+| JS декодера клипа (C2) | `frontend/clip.ts` (`decodeClip`, `decodeClipPayload`) |
 
 ## Клиент: режимы
 
@@ -279,6 +295,10 @@
 - `tests/test_avatar_page.py` — страница `GET /avatar/`: рендер без входа,
   контейнер сцены и атрибуты модуля, передача `AVATAR_MODEL_URL` в шаблон и
   подсказка при пустой модели.
+- `frontend/clip.test.ts` (vitest) — декодер формата клипа (C2): Float16 → Float32,
+  base64, gzip, разбор `layout` и смещений, значения landmark'ов по кадрам,
+  `pointAt`, ошибки (версия, `fps`, `frames`, `layout`, `data`, размер, не-gzip,
+  не-JSON). Фикстура `frontend/clip.fixture.ts` собирает настоящий файл клипа.
 - `tests/test_websocket.py` — два клиента одной группы получают сообщение,
   изоляция групп, отказ без разрешённого Origin, отключение echo вне DEBUG.
 - `accounts/tests/` — модель и роли, регистрация/вход/выход, доступ к админке,
@@ -522,27 +542,46 @@
 - Нейтральная поза — `humanoid.normalizedRestPose` самой модели (ТЗ 5.4:
   нейтральная поза в начале и конце клипа). Поза клипов будет накладываться поверх
   неё на C3/C4.
+- Декодер клипа (C2) вынесен в `frontend/clip.ts` отдельно от аватара: это чистая
+  функция над байтами без Three.js и DOM, поэтому её легко тестировать (vitest) и
+  переиспользовать в инструменте записи (D2, упаковка в тот же формат). Формат —
+  единственная точка правды: `CLIP_VERSION` на клиенте совпадает с `CLIP_VERSION`
+  на сервере (`services.clips`), соответствие проверяется тестом фикстуры.
+- Распаковка gzip — нативный `DecompressionStream('gzip')`, без сторонней
+  библиотеки: поддерживается всеми целевыми браузерами (НФТ, последние 2 версии
+  Chrome/Edge/Firefox/Safari). Поэтому декодер асинхронный; синхронных путей в
+  браузере нет.
+- Float16 читается вручную (`readFloat16` по IEEE 754 binary16): в браузерах нет
+  `Float16Array`. Тесты покрывают эталонные биты, ноль, субнормальные значения и
+  `NaN`/бесконечность, а фикстура пишет half-числа тем же правилом, что `numpy`.
+- `decodeClipPayload` превращает `layout` в `offsets` (`{part: {start, count}}`):
+  Калидокит на C3 берёт части скелета по именам (`pose`, `hand_l`, `hand_r`,
+  `face`), не пересчитывая смещения каждый кадр.
+- Тесты клиента гоняются в окружении Node (`environment: "node"` в
+  `vite.config.ts`): декодер — чистые функции над байтами, jsdom не нужен.
+  Фикстура (`frontend/clip.fixture.ts`) собирает настоящий `.json.gz` через
+  `node:zlib`; в сборку клиента фикстура не попадает (только в тесты).
 
-## Проверка C1
+## Проверка C2
 
 ```bash
-make check          # ruff + tsc + vite build + 341 тест — зелёный
+make check          # ruff + tsc + vitest (24) + pytest (341) + vite build — зелёный
 ```
 
-Критерий этапа («модуль рендерится на тестовой странице»): `GET /avatar/`
-возвращает 200 без входа, отдаёт контейнер сцены (`data-avatar-stage`), статус и
-точку входа `frontend/avatar-page.ts`; `AVATAR_MODEL_URL` доходит до шаблона, а
-при пустом значении страница подсказывает задать модель. Сборка Vite включает
-`frontend/avatar-page.ts` как отдельный entry. Ручная проверка: открыть `/avatar/`,
-убедиться, что сцена (свет, камера) отрисована, и загрузить VRM — аватар в
-нейтральной позе.
+Критерий этапа («тесты vitest на фикстуре»): `frontend/clip.test.ts` собирает
+настоящий клип (Float16 → gzip → base64 → JSON → `.json.gz`) и проверяет полную
+цепочку декодирования — значения landmark'ов по кадрам совпадают, `layout`
+раскладывается в `offsets`, `pointAt` возвращает координаты точки, а неверная
+версия/`fps`/`frames`/`layout`/`data`/размер и не-gzip/не-JSON дают
+`ClipDecodeError`. `npm test` встроен в `make check` (`make client-test`).
 
 ## Дальше
 
-**C1 готов.** Следующий — **C2**: декодер формата клипа (base64, gzip, Float16
-в массивы), тесты `vitest` на фикстуре. Дальше C3 (ретаргет landmarks через
-Kalidokit + One Euro) и C4 (очередь и блендинг). Читать:
+**C2 готов.** Следующий — **C3 ★**: ретаргет landmarks на кости VRM через
+Kalidokit + фильтр One Euro (тестовый клип проигрывается, ручная проверка на
+читаемость пальцев). Дальше C4 ★ (очередь клипов и блендинг). Читать:
 `docs/spec/clip-format.md`, `docs/spec/requirements.md` (3.3).
+
 
 Пополнение очереди из реальных занятий подключается в блоке **E**
 (`record_unknown_word` вызывается для слов без жеста), а запись жеста из очереди —
