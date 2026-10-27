@@ -105,6 +105,28 @@ def test_process_rss_bytes_for_current_process(load_test):
     assert size is not None and size > 0
 
 
+def test_memory_watcher_prefers_host_pid(load_test, monkeypatch):
+    monkeypatch.setattr(load_test, "process_rss_bytes", lambda pid: 111)
+    monkeypatch.setattr(load_test, "container_rss_bytes", lambda name: 222)
+
+    watcher = load_test.MemoryWatcher(pid=1, container="web")
+
+    assert watcher.read() == 111
+
+
+def test_memory_watcher_falls_back_to_container(load_test, monkeypatch):
+    monkeypatch.setattr(load_test, "process_rss_bytes", lambda pid: None)
+    monkeypatch.setattr(load_test, "container_rss_bytes", lambda name: 222)
+
+    watcher = load_test.MemoryWatcher(pid=1, container="web")
+
+    assert watcher.read() == 222
+
+
+def test_memory_watcher_returns_none_without_sources(load_test):
+    assert load_test.MemoryWatcher(pid=None, container=None).read() is None
+
+
 def test_rss_growth_from_report(load_test):
     report = load_test.LoadReport(clients=1, connected=1)
     report.rss_start_bytes = 10_000

@@ -1,8 +1,21 @@
 name: gluho-nemye-django
 
+# Продакшен-конфигурация (G4). Все настройки берутся из `.env`.
+# Локальная разработка использует те же сервисы; порты db/redis привязаны к
+# 127.0.0.1, наружу смотрят только Caddy (:80/:443).
+#
+# WebSocket-ы Caddy проксирует сам, отдельной настройки не нужно.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: app
       POSTGRES_USER: app
@@ -10,47 +23,85 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      # Только для локальных тестов и отладки; в проде порт наружу не нужен.
+      # Только локально: для `make test` и отладки с хоста. В проде порт не нужен.
       - 127.0.0.1:55432:5432
     healthcheck:
       test: [CMD-SHELL, pg_isready -U app -d app]
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *default-logging
 
   redis:
     image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
     ports:
       - 127.0.0.1:6380:6379
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *default-logging
 
   web:
     build: .
+    image: gluho-nemye-django-web
     container_name: gluho-nemye-django-web
+    restart: unless-stopped
+    # Один процесс: очереди фраз и presence живут в памяти процесса (ТЗ 5.7).
     command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 1
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - media:/app/media
     expose:
       - "8000"
+    healthcheck:
+      # `GET /health/` проверяет базу; python есть в образе, curl добавлять не нужно.
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5).status == 200 else 1)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    logging: *default-logging
 
   caddy:
     image: caddy:2
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      # Домен для HTTPS (например lecture.example.org) или `:80` локально.
+      # ACME_EMAIL нужен Caddy для регистрации сертификата; пустым его оставлять
+      # нельзя (директива email требует аргумент), поэтому есть запасное значение.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.org}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - media:/srv/media:ro
       - caddy_data:/data
+      - caddy_config:/config
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+    logging: *default-logging
 
 volumes:
   pgdata:
   media:
   caddy_data:
+  caddy_config:

@@ -222,6 +222,24 @@ WHITENOISE_USE_FINDERS = DEBUG
 # Caddy (или прокси университета) завершает HTTPS и передаёт исходную схему.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# Продакшен (G4): включается вместе с `DEBUG=False`. За HTTPS отвечает Caddy,
+# поэтому приложение только помечает куки и редиректы безопасными; HSTS не
+# ставим жёстко на разработку, чтобы не сломать локальный HTTP.
+if not DEBUG:
+    SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", True)
+    CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", True)
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)  # редирект делает Caddy
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", False)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    X_FRAME_OPTIONS = "DENY"
+
+# Срок хранения персональных данных (ТЗ 17): чат, фразы и завершённые комнаты
+# старше этого числа дней удаляет команда `purge_old_data` по cron.
+RETENTION_DAYS = max(1, int(os.environ.get("RETENTION_DAYS", "90")))
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},

@@ -1,16 +1,41 @@
-:80 {
+# Caddy (G4): HTTPS для прода, HTTP для локальной разработки.
+#
+# Адрес сайта задаётся переменной окружения SITE_ADDRESS и подставляется в
+# конфигурацию. Варианты:
+#   - продакшен:  SITE_ADDRESS=lecture.example.org  (Caddy сам берёт TLS-сертификат
+#                 Let's Encrypt и делает редирект HTTP→HTTPS);
+#   - локально:   SITE_ADDRESS=:80                   (HTTP без сертификата).
+#
+# Домен и почту для ACME задают в .env: SITE_ADDRESS, ACME_EMAIL.
+# Если HTTPS и домен обслуживает прокси университета, сервис caddy из
+# docker-compose убирается, а клипы раздаёт тот прокси (ТЗ 18.1).
+{
+	email {$ACME_EMAIL}
+	# Автоматический HTTPS включается для доменов; для `:80` он не применяется.
+}
+
+{$SITE_ADDRESS::80} {
 	encode zstd gzip
 
+	# Безопасные заголовки. HSTS ставит Caddy; приложение дублирует часть
+	# настроек при DEBUG=False.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# Клипы жестов раздаёт сам Caddy: они неизменяемы (новая версия — новый
+	# файл), поэтому кэш «навсегда»; file_server добавляет ETag и 304.
 	handle /media/* {
 		root * /srv
-		header {
-			# Клипы неизменяемы (новая версия — новый файл); ETag/304 делает file_server.
-			Cache-Control "public, max-age=604800, immutable"
-			X-Content-Type-Options "nosniff"
-		}
+		header Cache-Control "public, max-age=604800, immutable"
 		file_server
 	}
 
+	# Всё остальное — Django через uvicorn; WebSocket Caddy проксирует сам.
 	handle {
 		reverse_proxy web:8000
 	}

@@ -6,11 +6,12 @@ NPM ?= npm
 DB_PASSWORD ?= change-me
 LOAD_URL ?= http://localhost:80
 LOAD_CLIENTS ?= 30
+BACKUP_DIR ?= ./backups
 
 -include .env
 export
 
-.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-test client-dev load
+.PHONY: help check lint format test env setup up down logs migrate makemigrations shell seed-admin createsuperuser client-build client-typecheck client-test client-dev load backup purge
 
 help:
 	@echo "make setup           — .env, venv, Python- и npm-зависимости"
@@ -21,6 +22,8 @@ help:
 	@echo "make seed-admin      — создать/обновить администратора из ADMIN_*"
 	@echo "make env             — создать .env из .env.example"
 	@echo "make load            — нагрузка: комната и 30 WebSocket-клиентов (G3)"
+	@echo "make backup          — дамп базы и копия клипов (G4)"
+	@echo "make purge           — удалить данные старше RETENTION_DAYS (dry-run: DRY=1)"
 	@echo "make client-dev      — Vite dev-сервер с HMR на :5173"
 	@echo "make client-build    — production-сборка в static/dist"
 	@echo "make client-typecheck — проверка TypeScript"
@@ -89,6 +92,12 @@ load: .env
 	# нужен (лимиты скрипта локальны, серверный кэш от него не зависит).
 	DATABASE_URL="postgres://app:$(DB_PASSWORD)@127.0.0.1:55432/app" REDIS_URL="" \
 		$(PYTHON) scripts/load_test.py --url $(LOAD_URL) --clients $(LOAD_CLIENTS)
+
+backup:
+	BACKUP_DIR=$(BACKUP_DIR) ./scripts/backup.sh
+
+purge:
+	$(COMPOSE) exec -T web python manage.py purge_old_data $(if $(DRY),--dry-run,)
 
 makemigrations:
 	$(COMPOSE) exec web python manage.py makemigrations

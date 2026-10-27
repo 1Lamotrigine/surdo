@@ -4,12 +4,14 @@
 
 ## Текущий этап
 
-**G3 — скрипт нагрузки: комната и 30 WebSocket-клиентов: готов.**
+**G4 — прод-конфигурация: docker-compose, Caddy с HTTPS, uvicorn, `pg_dump` по
+cron, инструкция: готов.**
 
-Предыдущие этапы: **G2 — предложение установки PWA, G1 — PWA: манифест,
-иконки и service worker, F8 — управление отставанием, F7 — микрофон и VAD,
-F6 — приём аудиофразы, F5 — ASR, F4 — LLM в конвейере, F3 — сжатие,
-F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
+Предыдущие этапы: **G3 — скрипт нагрузки, G2 — предложение установки PWA,
+G1 — PWA: манифест, иконки и service worker, F8 — управление отставанием,
+F7 — микрофон и VAD, F6 — приём аудиофразы, F5 — ASR, F4 — LLM в конвейере,
+F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя:
+готовы.**
 
 ## Что готово
 
@@ -2140,8 +2142,43 @@ production-сборка Vite. Сборка выпускает `vad-web-worker-*.
   (клиенты, задержка, подключение, память), разбор URL, `human_bytes`, RSS
   текущего процесса. Прогон на сервере делается вручную командой из README.
 
+## G4: прод-конфигурация
+
+- **docker-compose:** `restart: unless-stopped` у всех сервисов, логи с
+  ротацией (`max-size 10m`, `max-file 3`), порты `db`/`redis` только на
+  loopback (наружу смотрят только Caddy :80/:443). У `web` healthcheck через
+  `GET /health/`, `caddy` стартует после `condition: service_healthy` у `web`;
+  HTTP/3 (`443/udp`). Named volumes: `pgdata`, `media`, `caddy_data`,
+  `caddy_config`.
+- **Caddy с HTTPS:** `Caddyfile` берёт адрес из `SITE_ADDRESS` (`:80` локально,
+  домен — автоматический TLS Let's Encrypt), `ACME_EMAIL` для ACME. Заголовки
+  `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`,
+  `X-Frame-Options`. Клипы раздаёт сам Caddy из `/srv/media` с `immutable`-кэшем;
+  остальное — `reverse_proxy web:8000`, WebSocket проксируется автоматически.
+- **Django при `DEBUG=False`:** `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`,
+  `SECURE_HSTS_SECONDS`/`INCLUDE_SUBDOMAINS`/`PRELOAD`, `SECURE_CONTENT_TYPE_NOSNIFF`,
+  `SECURE_REFERRER_POLICY`, `X_FRAME_OPTIONS=DENY`; SSL-редирект делает Caddy
+  (`SECURE_SSL_REDIRECT` по умолчанию off).
+- **Хранение данных (ТЗ 17):** `settings.RETENTION_DAYS` (ориентир 90) и команда
+  `purge_old_data` (`pipeline/retention.py`, `--days`, `--dry-run`): удаляет
+  сообщения чата и фразы старше срока, а также закрытые комнаты, закрытые раньше
+  срока (каскадом — участники, чат, фразы). Открытые комнаты не трогает.
+- **Бэкап:** `scripts/backup.sh` — `pg_dump` в gzip + копия каталога клипов через
+  `docker compose cp`, контрольные суммы SHA-256, ротация `BACKUP_KEEP` копий;
+  готов к cron и переносу на другой хост.
+- **Инструкция:** `docs/DEPLOY.md` — от чистого хоста до работающего сервиса
+  (≤ 15 минут), резервные копии и очистка по cron, обновление, логи, вариант «за
+  прокси университета», откат из дампа.
+- **Проверка:** `make check` зелёный; образ собирается, `docker compose up -d`
+  поднимает стек, `web` становится healthy, `caddy` ждёт его и отвечает на
+  `GET /health/`, `/manifest.webmanifest`, `/sw.js`, `/static/...` и раздаёт
+  заголовки безопасности. `make load` против полного стека: 30/30 подключений,
+  доставка чата медиана ~11 мс / p95 ~17 мс, рост RSS в контейнере ≈ 0.2 МиБ.
+  Тесты: `tests/test_retention.py` (7), `tests/test_deploy.py` (8),
+  `tests/test_load_script.py` (+3, память хоста/контейнера).
+
 ## Дальше
 
-**G3 готов.** Следующий этап — **G4**: прод-конфигурация (docker-compose, Caddy
-с HTTPS, uvicorn, `pg_dump` по cron, инструкция развёртывания).
+**G4 готов.** Следующий этап — **G5**: README, схема архитектуры и инструкция
+редактору словаря.
 

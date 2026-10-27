@@ -226,7 +226,19 @@ app/
   по необязательному `--max-rss-growth`. Коды возврата: 0 — ок, 1 — превышены
   пороги, 2 — ошибка запуска. Требует запущенного сервера и одинакового
   `SECRET_KEY` у скрипта и сервера; новых зависимостей нет (`websockets` уже
-  приходит с `uvicorn[standard]`).
+  приходит с `uvicorn[standard]`). Память читается из `/proc`/`ps` (хост) или
+  через `docker exec` в контейнер (`--server-container`).
+- Прод-конфигурация (G4): `docker-compose.yml` — `restart: unless-stopped`,
+  healthcheck `web` через `/health/` (caddy ждёт healthy), логи с ротацией,
+  порты db/redis только на loopback. `Caddyfile` — адрес из `SITE_ADDRESS`
+  (`:80` локально, домен с автоматическим HTTPS в проде), HSTS и заголовки
+  безопасности, клипы из `/srv/media`, `reverse_proxy web:8000` (WebSocket
+  Caddy проксирует сам). `config/settings.py` при `DEBUG=False` включает
+  `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/HSTS/`X_FRAME_OPTIONS`, а
+  `RETENTION_DAYS` задаёт срок хранения. Команда `purge_old_data`
+  (`pipeline/retention.py`) удаляет чат/фразы и закрытые комнаты старше срока;
+  `scripts/backup.sh` делает `pg_dump` + копию клипов с ротацией копий.
+  Инструкция — `docs/DEPLOY.md`, секреты только в `.env`.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при

@@ -94,6 +94,23 @@ docker compose exec web python manage.py seed_admin
 На Android (Chrome) кнопка «Установить» открывает системный диалог, на iPhone
 (Safari) показывается инструкция «Поделиться → На экран Домой».
 
+## Развёртывание
+
+Прод-развёртывание на сервере (HTTPS через Caddy, резервные копии, очистка
+данных) описано в `docs/DEPLOY.md`. Кратко:
+
+```bash
+cp .env.example .env      # заполните SECRET_KEY, DEBUG=False, домен, ADMIN_*
+docker compose up -d --build
+docker compose exec web python manage.py migrate
+docker compose exec web python manage.py seed_admin
+```
+
+`docker compose up` поднимает `web` (uvicorn), `db`, `redis` и `caddy`;
+Caddy сам получает TLS-сертификат для домена из `SITE_ADDRESS` и раздаёт клипы.
+Проверка: `curl https://<домен>/health/`. Бэкап — `make backup`, очистка старых
+данных по сроку хранения — `make purge`.
+
 ## Нагрузка
 
 Критерий приёмки №5 (комната на 30 одновременных подключений) проверяется

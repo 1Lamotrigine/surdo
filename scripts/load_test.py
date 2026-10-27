@@ -200,6 +200,27 @@ def process_rss_bytes(pid: int) -> int | None:
         return None
 
 
+def container_rss_bytes(container: str) -> int | None:
+    """RSS процесса в контейнере: `docker exec` + `/proc` внутри контейнера."""
+    try:
+        output = subprocess.run(
+            [
+                "docker",
+                "exec",
+                container,
+                "python",
+                "-c",
+                "import glob; print(sum(int(open(p).read().split()[1]) for p in glob.glob('/proc/*/statm')))",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return int(output) * 4096 if output else None
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return None
+
+
 def find_server_pid() -> int | None:
     """Найти PID процесса сервера по имени uvicorn/daphne (эвристика)."""
     for pattern in ("uvicorn", "daphne"):
@@ -220,6 +241,28 @@ def find_server_pid() -> int | None:
             if pid != os.getpid():
                 return pid
     return None
+
+
+class MemoryWatcher:
+    """Читает RSS сервера: сначала пытается по PID хоста, затем в контейнере.
+
+    В `make up` сервер живёт в контейнере, поэтому чтение `/proc` хоста ничего
+    не найдёт — тогда пробуем `docker exec` в контейнер (имя из
+    `--server-container`, по умолчанию `gluho-nemye-django-web`).
+    """
+
+    def __init__(self, *, pid: int | None, container: str | None) -> None:
+        self.pid = pid
+        self.container = container
+
+    def read(self) -> int | None:
+        if self.pid is not None:
+            value = process_rss_bytes(self.pid)
+            if value is not None:
+                return value
+        if self.container:
+            return container_rss_bytes(self.container)
+        return None
 
 
 # --- Нагрузка -----------------------------------------------------------------------
@@ -259,7 +302,7 @@ async def run_load(
     cookies: list[str],
     *,
     origin: str,
-    server_pid: int | None,
+    memory: MemoryWatcher | None,
 ) -> LoadReport:
     """Подключить всех клиентов и измерить handshake, presence и доставку чата."""
     from websockets.asyncio.client import connect
@@ -293,8 +336,8 @@ async def run_load(
         connections.append(websocket)
         tasks.append(asyncio.create_task(listener.pump(websocket)))
 
-    if server_pid is not None:
-        report.rss_start_bytes = process_rss_bytes(server_pid)
+    if memory is not None:
+        report.rss_start_bytes = memory.read()
 
     # Дать presence разойтись по группе.
     await asyncio.sleep(PRESENCE_SETTLE_S)
@@ -320,8 +363,8 @@ async def run_load(
             # Доставка не уложилась — фиксируем максимумом, чтобы порог сработал.
             report.chat_ms.append(CHAT_DELIVERY_TIMEOUT_S * 1000)
 
-    if server_pid is not None:
-        report.rss_peak_bytes = process_rss_bytes(server_pid)
+    if memory is not None:
+        report.rss_peak_bytes = memory.read()
 
     for task in tasks:
         task.cancel()
@@ -421,6 +464,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="PID процесса сервера для замера памяти (иначе ищется автоматически)",
     )
     parser.add_argument(
+        "--server-container",
+        default=os.environ.get("LOAD_CONTAINER", "gluho-nemye-django-web"),
+        help="имя контейнера сервера для замера памяти (случай `make up`)",
+    )
+    parser.add_argument(
         "--max-rss-growth",
         type=int,
         default=None,
@@ -447,8 +495,11 @@ def main(argv: list[str] | None = None) -> int:
     target_url = websocket_url(args.url, join_code)
     print(f"Комната {join_code}, клиентов {len(cookies)}, WS {target_url}")
 
-    server_pid = args.server_pid or find_server_pid()
-    report = asyncio.run(run_load(target_url, cookies, origin=args.url, server_pid=server_pid))
+    memory = MemoryWatcher(
+        pid=args.server_pid or find_server_pid(),
+        container=args.server_container,
+    )
+    report = asyncio.run(run_load(target_url, cookies, origin=args.url, memory=memory))
 
     if args.json:
         print(json.dumps(report.summary(), ensure_ascii=False, indent=2))
