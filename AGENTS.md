@@ -129,9 +129,10 @@ app/
   глобальный семафор `ASR_MAX_CONCURRENCY`, лимит `ROOM_QUEUE_MAX` со сбросом
   самого старого ожидающего задания. Цикл очереди — в отдельном daemon-потоке
   (Django-вью синхронное). Обработчик может быть sync (уходит в
-  `asyncio.to_thread`) или async (F4: `process_text_job_async`).
-  Ошибка одного задания не убивает воркер; `Future` нужен тестам, HTTP его не
-  ждёт. Очереди в памяти → один процесс uvicorn.
+  `asyncio.to_thread`) или async (по умолчанию `process_phrase_job_async`,
+  который различает текст и аудио). Ошибка одного задания не убивает воркер;
+  `Future` нужен тестам, HTTP его не ждёт. Очереди в памяти → один процесс
+  uvicorn.
 - LLM-глоссы в конвейере (F4): `pipeline/gloss_engine.py` собирает словарь из
   проверенных жестов и `DictionaryVersion.current`, вызывает `to_glosses`.
   В async-пути `compute_glosses_async` читает словарь через
@@ -151,7 +152,16 @@ app/
   `BoundedSemaphore(ASR_MAX_CONCURRENCY)`, даёт sync `transcribe` и async
   `transcribe_async`; аудио передаётся байтами в памяти и не сохраняется.
   Тесты используют валидный короткий WAV и подменённую модель, без скачивания
-  весов. Приём аудио и связка с очередью — F6.
+  весов.
+- Приём аудиофразы (F6): `POST /api/rooms/<code>/phrase/`
+  (`pipeline.api.phrase_api`) — multipart, только владелец комнаты/админ,
+  ответ 202. Файл читается в память (лимит 2 МиБ), загруженный файл сразу
+  закрывается, на диск и в БД аудио не пишется. `PipelineQueue.submit_audio`
+  ставит `AudioJob` в ту же очередь комнаты; `process_audio_job_async`
+  вызывает `services.asr.transcribe_async` под `ASR_TIMEOUT` (20 с),
+  измеряет `asr_ms`, затем идёт общим путём: `asr_text` → глоссы → `Utterance`
+  с `seq` → `utterance`. Пустой результат ASR не создаёт фразу; ошибка/таймаут
+  ASR логируется и завершает `Future` ошибкой, не убивая воркер.
 - Живые фразы (E3): `pipeline/events.py` рассылает в группу `room_<id>`
   `asr_text` (сразу распознанный текст) и `utterance` (глоссы E1 + клипы
   проверенных жестов/чисел/дактиля в порядке показа). Фоновый поток очереди

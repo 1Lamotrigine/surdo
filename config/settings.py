@@ -129,6 +129,9 @@ ROOM_QUEUE_MAX = max(1, int(os.environ.get("ROOM_QUEUE_MAX", "5")))
 # float16; модель загружается один раз на процесс при первом запросе.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small").strip() or "small"
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu").strip().lower() or "cpu"
+# Жёсткий предел ожидания распознавания одной фразы (ТЗ 5.7). По истечении
+# фраза не задерживает очередь; ошибка уходит в лог задания.
+ASR_TIMEOUT = float(os.environ.get("ASR_TIMEOUT") or "20")
 
 # LLM-глоссы (F1/F4): провайдер, модель и ключ. Пустые значения означают, что
 # LLM не настроена: конвейер перейдёт в упрощённый режим F2. Таймаут — жёсткий

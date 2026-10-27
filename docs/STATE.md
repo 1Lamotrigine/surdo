@@ -4,9 +4,9 @@
 
 ## Текущий этап
 
-**F5 — распознавание речи faster-whisper: готов.**
+**F6 — приём аудиофразы и связка ASR с конвейером: готов.**
 
-Предыдущие этапы: **F4 — LLM в конвейере, F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
+Предыдущие этапы: **F5 — ASR, F4 — LLM в конвейере, F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
 
 ## Что готово
 
@@ -20,7 +20,7 @@
   `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
   `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`,
   `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_URL`, `LLM_TIMEOUT`,
-  `WHISPER_MODEL`, `WHISPER_DEVICE`.
+  `WHISPER_MODEL`, `WHISPER_DEVICE`, `ASR_TIMEOUT`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -540,6 +540,16 @@
   даёт sync `transcribe` и async `transcribe_async`; аудио никуда не
   сохраняется. Модульные `services.asr.transcribe`/`transcribe_async` работают
   через общий сервис, а `set_asr_provider` позволяет подменить распознаватель.
+- **Приём аудиофразы (F6):** `POST /api/rooms/<code>/phrase/`
+  (`pipeline.api.phrase_api`) принимает multipart-аудио, проверяет, что это
+  владелец комнаты/админ, и отвечает 202. Файл читается в память (лимит 2 МиБ),
+  загруженный файл сразу закрывается, на диск и в БД аудио не пишется.
+  `PipelineQueue.submit_audio` создаёт `AudioJob` в очереди комнаты, а
+  `process_audio_job_async` вызывает `services.asr.transcribe_async` с
+  `ASR_TIMEOUT=20`, измеряет `asr_ms` и передаёт распознанный текст в общий путь
+  `asr_text` → глоссы → `Utterance` → `utterance`. Пустой результат ASR не
+  создаёт фразу; ошибка/таймаут завершает `Future` ошибкой и логируется, не
+  останавливая воркер комнаты.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -569,6 +579,7 @@
 | Лента фраз (HTMX-фрагмент) | `GET /rooms/<code>/live/feed/` → `rooms.views.room_live_feed` |
 | История для переподключения | `GET /api/rooms/<code>/history/?after_seq=&after_message_id=` → `rooms.api.chat_history_api` |
 | Приём текста фразы (преподаватель) | `POST /api/rooms/<code>/text/` → `pipeline.api.text_api` |
+| Приём аудиофразы (преподаватель) | `POST /api/rooms/<code>/phrase/` → `pipeline.api.phrase_api` |
 | Файл клипа жеста (ETag/304) | `GET /media/clips/<id>.json.gz` → `dictionary.views.clip_file` |
 | Список словаря (публичный) | `GET /api/dictionary/?lang=&status=` → `dictionary.api.dictionary_api` |
 | Создание жеста (редактор) | `POST /api/signs/` → `dictionary.api.create_sign_api` |
@@ -604,6 +615,7 @@
 | Сжатие фразы (F3) | `services/gloss.py:compress`, `compress_locally`, `build_compress_prompt`, `compress_response_schema` |
 | Конвейер LLM-глосс (F4) | `pipeline/gloss_engine.py` (`compute_glosses`, `compute_glosses_async`, `GlossOutcome`, `verified_gloss_dictionary`), `services/llm.py` (`HttpLLMProvider`, `provider_from_settings`), `pipeline/queue.py:process_text_job_async` |
 | Распознавание речи (F5) | `services/asr.py` (`transcribe`, `transcribe_async`, `AsrResult`, `AsrProvider`, `FasterWhisperProvider`, `AsrService`) |
+| Аудиофраза в конвейере (F6) | `pipeline/api.py:phrase_api`, `pipeline/queue.py` (`AudioJob`, `submit_audio`, `process_audio_job_async`, `process_phrase_job_async`) |
 
 ## Клиент: режимы
 
@@ -802,6 +814,15 @@
   числе при параллельных первых вызовах), CPU int8/CUDA float16, отказ на
   пустое аудио/неизвестный язык, обёртка ошибок модели, лимит параллелизма
   пула и семафора, async-вызов без блокировки event loop, подмена провайдера.
+- `pipeline/tests/test_phrase_api.py` (F6) — аноним 401, чужой 403, владелец и
+  админ 202, закрытая/неизвестная комната 404, multipart-поле `audio`/`file`,
+  пустой/не-аудио/слишком большой файл, отсутствие записи в БД и медиа,
+  передача байтов и `started_at` в очередь, ответ без ожидания обработчика.
+- `pipeline/tests/test_audio_processing.py` (F6) — ASR получает байты и язык
+  комнаты (`ru`/`kk`), `ASR_TIMEOUT` доходит до сервиса, `asr_ms` сохраняется,
+  `asr_text` приходит до `utterance`, казахская комната даёт `ksl`, пустой
+  текст не создаёт фразу, ошибка ASR не останавливает воркер, подменённый
+  провайдер ASR проходит через общий сервис, аудио не появляется в медиа.
 - `dictionary/tests/test_statuses.py` — чистые правила переходов: разрешённые и
   запрещённые пары, требуемые роли, `allowed_targets`, совпадение значений
   `StrEnum` и `TextChoices`.
@@ -1843,8 +1864,9 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
   `WHISPER_DEVICE`, а `WHISPER_MODEL` может быть именем или путём к локальной
   модели.
 - Ошибки модели не глотаются: провайдер оборачивает их в `AsrError`, пул — в
-  `AsrError`, таймаут — в `AsrTimeoutError`. Решение «показать субтитры и
-  `degraded`» принимает F6, где известны комната и событие `asr_text`.
+  `AsrError`, таймаут — в `AsrTimeoutError`. F6 логирует такую ошибку и
+  завершает `Future` ошибкой: без распознанного текста субтитров нет, поэтому
+  пустая фраза не создаётся.
 - `faster-whisper==1.2.1` — новая зависимость этапа (ТЗ 6); в Dockerfile
   добавлен `libgomp1`, нужный CTranslate2. Веса моделей в образ не входят:
   они скачиваются при первом использовании и кэшируются Hugging Face.
@@ -1852,10 +1874,51 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
   требует сотни мегабайт и сеть, что сделало бы `make check` невоспроизводимым.
   Контракт провайдера при этом проверяется на настоящих байтах WAV.
 
+## Проверка F6
+
+```bash
+.venv/bin/python -m pytest pipeline/tests/test_phrase_api.py -q
+.venv/bin/python -m pytest pipeline/tests/test_audio_processing.py -q
+```
+
+Тесты эндпоинта подменяют `submit_audio`, поэтому не запускают модель. Тесты
+обработки подменяют `pipeline.queue.transcribe_async` и проверяют весь путь до
+`Utterance` без скачивания весов. Полный прогон — **584 pytest**, `make check`
+зелёный. Для ручной проверки нужен реальный файл WAV/Opus и настроенный
+`faster-whisper`; аудио после распознавания нигде не остаётся.
+
+## Решения F6
+
+- `POST /api/rooms/<code>/phrase/` (`phrase_api`) повторяет правила E2: аноним
+  401, чужой преподаватель 403, закрытая/неизвестная комната 404. Успех — 202
+  `{"status": "accepted"}`; запрос не ждёт ASR, глосс и сохранения.
+- Multipart принимает поле `audio` (для совместимости — `file`). Файл читается
+  в память, `UploadedFile.close()` вызывается сразу, в `MEDIA_ROOT` ничего не
+  пишется. Лимит 2 МиБ: 8 с WAV 16 кГц mono 16 бит занимают около 256 КБ, а
+  Django держит такой файл в памяти, не создавая временный на диске.
+- `AudioJob` идёт в ту же очередь комнаты, что и текст: порядок фраз не
+  нарушается, переполнение `ROOM_QUEUE_MAX` работает одинаково. Обработчик по
+  умолчанию — `process_phrase_job_async`, который различает `TextJob` и
+  `AudioJob`.
+- ASR вызывается через `services.asr.transcribe_async` под
+  `asyncio.wait_for(..., ASR_TIMEOUT)` (по умолчанию 20 с). `asr_ms`
+  измеряется только вокруг распознавания; `gloss_ms` по-прежнему измеряет LLM.
+  Язык распознавания берётся из `room.lang`, язык жестов — из того же правила
+  `ru → rsl`, `kk → ksl`.
+- После ASR текст сразу уходит событием `asr_text`, затем общий путь F4
+  считает глоссы, сохраняет `Utterance` с `asr_ms` и рассылает `utterance`.
+  Если ASR вернул пустую строку (тишина), фраза и события не создаются.
+- Ошибка или таймаут ASR логируются и завершают `Future` задания ошибкой:
+  распознанного текста нет, поэтому «субтитры» показать нечем; воркер комнаты
+  продолжает работу. Таймаут/ошибка LLM после успешного ASR, как и в F4, даёт
+  `degraded=True` и пустые токены.
+- Аудио не попадает ни в модель, ни в медиа, ни в лог: в логах только комната
+  и размер задания. После обработки воркер сбрасывает ссылку на последнее
+  задание, чтобы байты не удерживались в памяти.
+
 ## Дальше
 
-**F5 готов.** Следующий — F6: `POST /api/rooms/<code>/phrase/` с multipart
-аудио, ответ 202, фоновая обработка через `services.asr`, `asr_ms` и событие
-`asr_text`; аудио хранится только в памяти. После него останутся F7
-(микрофон/VAD в браузере) и F8 (пороги отставания, ускорение и `compress`).
+**F6 готов.** Следующий — F7: микрофон преподавателя и VAD в браузере, отправка
+нарезанных фраз на `POST /api/rooms/<code>/phrase/`. Затем F8 — пороги
+отставания, ускорение показа и `services.gloss.compress`.
 

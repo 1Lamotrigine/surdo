@@ -4,7 +4,7 @@ from django.urls import include, path
 from config import views
 from dictionary.api import create_sign_api, dictionary_api, review_sign_api
 from dictionary.views import clip_file
-from pipeline.api import text_api
+from pipeline.api import phrase_api, text_api
 from rooms.api import chat_history_api, create_room_api
 
 urlpatterns = [
@@ -19,6 +19,7 @@ urlpatterns = [
     path("api/rooms/", create_room_api, name="api-room-create"),
     path("api/rooms/<str:join_code>/history/", chat_history_api, name="api-room-history"),
     path("api/rooms/<str:join_code>/text/", text_api, name="api-room-text"),
+    path("api/rooms/<str:join_code>/phrase/", phrase_api, name="api-room-phrase"),
     path("api/dictionary/", dictionary_api, name="api-dictionary"),
     path("api/signs/", create_sign_api, name="api-sign-create"),
     path("api/signs/<int:sign_id>/review/", review_sign_api, name="api-sign-review"),
