@@ -17,6 +17,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
 
+from pipeline.services import record_display_started
 from rooms import presence
 from rooms.consumers_support import resolve_connection
 from rooms.ratelimit import check_chat_rate_limit
@@ -138,6 +139,35 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json({"type": "pong"})
         elif message_type == "chat":
             await self._handle_chat(content.get("body", ""))
+        elif message_type == "display_started":
+            await self._handle_display_started(content)
+
+    async def _handle_display_started(self, content: dict) -> None:
+        """E4: студент сообщил фактическое начало показа фразы.
+
+        Метрика сохраняется у ``Utterance``, а уровень отставания уходит в
+        группу. Consumer преподавателя отдаёт его в браузер, студенческие
+        соединения событие молча игнорируют.
+        """
+        utterance_id = content.get("utterance_id")
+        if (
+            not isinstance(utterance_id, int)
+            or isinstance(utterance_id, bool)
+            or utterance_id <= 0
+        ):
+            return
+
+        lag = await database_sync_to_async(record_display_started)(
+            self.room_id,
+            utterance_id,
+            ts=content.get("ts"),
+        )
+        if lag is None:
+            return
+        await self.channel_layer.group_send(
+            self.group_name,
+            {"type": "lag.status", **lag.as_event()},
+        )
 
     async def _handle_chat(self, body: str) -> None:
         rate = await database_sync_to_async(check_chat_rate_limit)(
@@ -198,6 +228,26 @@ class RoomConsumer(AsyncJsonWebsocketConsumer):
         """E3: глоссы фразы и ссылки на клипы для очереди студента."""
         await self.send_json(
             {"type": "utterance", "utterance": event.get("utterance", {})}
+        )
+
+    async def lag_status(self, event: dict) -> None:
+        """E4: индикатор отставания видит только преподаватель."""
+        if not getattr(self, "is_teacher", False):
+            return
+        await self.send_json(
+            {
+                "type": "lag_status",
+                "lag_ms": event.get("lag_ms", 0),
+                "level": event.get("level", "green"),
+            }
+        )
+
+    async def unknown_words(self, event: dict) -> None:
+        """E4: слова без жеста из последней фразы — только преподавателю."""
+        if not getattr(self, "is_teacher", False):
+            return
+        await self.send_json(
+            {"type": "unknown_words", "words": event.get("words", [])}
         )
 
     async def room_closed(self, event: dict) -> None:

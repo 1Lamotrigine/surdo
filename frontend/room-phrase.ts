@@ -25,6 +25,8 @@ export type RoomPhraseOptions = {
   modelUrl?: string;
   /** Скорость показа 0.6–1.3x (по умолчанию 1). */
   speed?: number;
+  /** Фраза действительно начала показываться (E4: display_started). */
+  onDisplayStarted?: (utterance: UtteranceEvent) => void;
 };
 
 function delay(ms: number): Promise<void> {
@@ -42,12 +44,14 @@ export class RoomPhrasePlayer {
   private readonly ready: Promise<void>;
   private readonly queue: PhraseQueue<UtteranceEvent>;
   private readonly speed: number;
+  private readonly onDisplayStarted?: (utterance: UtteranceEvent) => void;
   private player: ClipPlayer | null = null;
   private activeResolve: (() => void) | null = null;
   private disposed = false;
 
   constructor(root: HTMLElement, options: RoomPhraseOptions = {}) {
     this.speed = Math.min(1.3, Math.max(0.6, options.speed ?? 1));
+    this.onDisplayStarted = options.onDisplayStarted;
     this.status = root.querySelector<HTMLElement>("[data-room-phrase-status]");
 
     const avatarStage = root.querySelector<HTMLElement>("[data-room-avatar-stage]");
@@ -147,7 +151,10 @@ export class RoomPhrasePlayer {
     if (this.disposed) return;
 
     // Текст и слова появляются сразу; клипы и аватар могут догружаться.
+    // С этого момента фраза считается показанной: очередь уже доиграла
+    // предыдущие фразы, поэтому задержка отражает реальное отставание (E4).
     this.renderSubtitles(utterance);
+    this.onDisplayStarted?.(utterance);
     this.setStatus(utterance.degraded ? "Фраза показана только субтитрами." : "Загрузка клипов…");
 
     const loadedPromise = loadClipQueue(utterance, {
@@ -221,11 +228,15 @@ export class RoomPhrasePlayer {
 }
 
 /** Создать сцену по разметке страницы студента. */
-export function createRoomPhrasePlayer(root: HTMLElement): RoomPhrasePlayer {
+export function createRoomPhrasePlayer(
+  root: HTMLElement,
+  options: Pick<RoomPhraseOptions, "onDisplayStarted"> = {},
+): RoomPhrasePlayer {
   const modelUrl = root.dataset.avatarModelUrl || undefined;
   const speed = Number(root.dataset.avatarSpeed ?? "1");
   return new RoomPhrasePlayer(root, {
     modelUrl,
     speed: Number.isFinite(speed) ? speed : 1,
+    onDisplayStarted: options.onDisplayStarted,
   });
 }

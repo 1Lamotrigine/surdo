@@ -48,10 +48,19 @@
 
     <div class="teacher-live-grid">
       <div class="teacher-live-main">
-        <div class="student-stage" aria-label="Область аватара и субтитров">
-          <p class="student-placeholder">
-            Субтитры и панель фраз появятся в блоке E. Пока здесь чат и участники.
-          </p>
+        <div class="teacher-monitor">
+          <div class="lag-panel" data-lag-panel data-level="idle" aria-live="polite">
+            <p class="eyebrow">Отставание аватара</p>
+            <p class="lag-value" data-lag-value>Нет данных</p>
+            <p class="lag-hint" data-lag-hint>Ждём первую фразу…</p>
+          </div>
+
+          <aside class="unknown-panel" aria-labelledby="unknown-title">
+            <h2 id="unknown-title">Слова без жеста</h2>
+            <ul class="unknown-list" data-unknown-words aria-live="polite">
+              <li class="unknown-word-empty">Пока нет.</li>
+            </ul>
+          </aside>
         </div>
       </div>
 

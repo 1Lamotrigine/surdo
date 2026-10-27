@@ -136,3 +136,25 @@ def test_broadcast_utterance_sends_payload(monkeypatch):
     assert payload["type"] == "utterance"
     assert payload["utterance"]["text"] == "Учебник"
     assert payload["utterance"]["clips"] == []
+
+
+def test_broadcast_utterance_sends_unknown_words(monkeypatch):
+    layer = FakeChannelLayer()
+    monkeypatch.setattr(events, "get_channel_layer", lambda: layer)
+    utterance = SimpleNamespace(
+        pk=9,
+        room_id=7,
+        as_event=lambda: {"id": 9, "seq": 1, "text": "Иванов"},
+        glosses={"unknown": ["Иванов", "Петров"]},
+    )
+
+    run_with_loop(lambda: events.broadcast_utterance(utterance))
+
+    assert layer.sent[1] == (
+        "room_7",
+        {
+            "type": "unknown.words",
+            "words": ["Иванов", "Петров"],
+            "utterance_id": 9,
+        },
+    )

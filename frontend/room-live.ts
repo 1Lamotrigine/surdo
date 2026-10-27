@@ -36,6 +36,8 @@ type ServerEvent =
   | { type: "chat_error"; error: string; retry_after?: number }
   | { type: "asr_text"; text: string }
   | { type: "utterance"; utterance: UtteranceEvent }
+  | { type: "lag_status"; lag_ms: number; level: string }
+  | { type: "unknown_words"; words: string[] }
   | { type: "pong" }
   | { type: "room_closed" }
   | { type: "participant_removed" }
@@ -79,6 +81,10 @@ export function setupRoomLive(root: HTMLElement): void {
   const isStudentView = root.hasAttribute("data-student-view");
   const wakeLockStatus = root.querySelector<HTMLElement>("[data-wake-lock-status]");
   const liveCaption = root.querySelector<HTMLElement>("[data-room-live-caption]");
+  const lagPanel = root.querySelector<HTMLElement>("[data-lag-panel]");
+  const lagValue = root.querySelector<HTMLElement>("[data-lag-value]");
+  const lagHint = root.querySelector<HTMLElement>("[data-lag-hint]");
+  const unknownWordsList = root.querySelector<HTMLElement>("[data-unknown-words]");
   const removeParticipantUrl = root.dataset.removeParticipantUrl;
   const csrfToken = root.dataset.csrfToken;
   let pingTimer: number | undefined;
@@ -94,6 +100,18 @@ export function setupRoomLive(root: HTMLElement): void {
   };
   let phrasePlayer: Promise<PhraseController> | null = null;
 
+  /** E4: сообщить серверу, что фраза действительно начала показываться. */
+  const sendDisplayStarted = (utterance: UtteranceEvent): void => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({
+        type: "display_started",
+        utterance_id: utterance.id,
+        ts: Date.now(),
+      }),
+    );
+  };
+
   /**
    * Тяжёлый аватар/плеер грузится только на странице студента и только когда
    * пришла первая фраза. До этого субтитры `asr_text` показывает room-live.
@@ -101,7 +119,11 @@ export function setupRoomLive(root: HTMLElement): void {
   const getPhrasePlayer = (): Promise<PhraseController> | null => {
     if (!isStudentView || !root.querySelector("[data-room-avatar-stage]")) return null;
     phrasePlayer ??= import("./room-phrase")
-      .then((module) => module.createRoomPhrasePlayer(root))
+      .then((module) =>
+        module.createRoomPhrasePlayer(root, {
+          onDisplayStarted: (utterance) => sendDisplayStarted(utterance),
+        }),
+      )
       .catch((error: unknown) => {
         phrasePlayer = null;
         setStatus("Не удалось загрузить аватар: показываем субтитры.", "error");
@@ -118,6 +140,45 @@ export function setupRoomLive(root: HTMLElement): void {
 
   const hideLiveCaption = (): void => {
     if (liveCaption) liveCaption.hidden = true;
+  };
+
+  /** E4: индикатор FR-15. Уровень считает сервер, клиент только показывает. */
+  const renderLagStatus = (lagMs: number, level: string): void => {
+    const safeLag = Number.isFinite(lagMs) ? Math.max(0, lagMs) : 0;
+    const safeLevel = level === "yellow" || level === "red" ? level : "green";
+    const seconds = (safeLag / 1000).toLocaleString("ru-RU", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    });
+    if (lagPanel) lagPanel.dataset.level = safeLevel;
+    if (lagValue) lagValue.textContent = `${seconds} с`;
+    if (lagHint) {
+      lagHint.textContent =
+        safeLevel === "red"
+          ? "Замедлитесь: аватар отстаёт больше чем на 10 секунд."
+          : safeLevel === "yellow"
+            ? "Отставание растёт — говорите короче."
+            : "Отставание в норме.";
+    }
+  };
+
+  /** E4: слова последней фразы, для которых в словаре нет проверенного жеста. */
+  const renderUnknownWords = (words: string[]): void => {
+    if (!unknownWordsList) return;
+    unknownWordsList.innerHTML = "";
+    if (words.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "unknown-word-empty";
+      empty.textContent = "Все слова есть в словаре.";
+      unknownWordsList.append(empty);
+      return;
+    }
+    for (const word of words) {
+      const item = document.createElement("li");
+      item.className = "unknown-word";
+      item.textContent = word;
+      unknownWordsList.append(item);
+    }
   };
 
   // C8: уведомления и Wake Lock только на странице студента, не в панели.
@@ -328,6 +389,10 @@ export function setupRoomLive(root: HTMLElement): void {
         } else {
           hideLiveCaption();
         }
+      } else if (isEvent(payload, "lag_status")) {
+        renderLagStatus(payload.lag_ms, payload.level);
+      } else if (isEvent(payload, "unknown_words")) {
+        if (isTeacherView) renderUnknownWords(payload.words);
       } else if (isEvent(payload, "chat_error") && chatHint) {
         chatHint.textContent =
           payload.error === "rate_limited"

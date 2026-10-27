@@ -55,5 +55,6 @@ class Utterance(models.Model):
             "text": self.text,
             "glosses": self.glosses,
             "degraded": self.degraded,
+            "display_lag_ms": self.display_lag_ms,
             "ts": self.started_at.isoformat(),
         }

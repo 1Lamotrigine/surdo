@@ -1,4 +1,4 @@
-"""События конвейера фраз (E3): ``asr_text``, ``utterance`` и ссылки на клипы.
+"""События конвейера фраз (E3–E4): ``asr_text``, ``utterance``, клипы и слова без жеста.
 
 Фоновая очередь E2 работает в отдельном потоке, а Channels-группы живут в
 цикле событий ASGI. Чтобы не смешивать циклы, ASGI-приложение при каждом
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # ``asr_text``. Для ``utterance`` имя совпадает с методом напрямую.
 ASR_TEXT_EVENT = "asr.text"
 UTTERANCE_EVENT = "utterance"
+UNKNOWN_WORDS_EVENT = "unknown.words"
 
 _BROADCAST_TIMEOUT = 5.0
 
@@ -172,9 +173,25 @@ def broadcast_asr_text(room_id: int, text: str) -> None:
     _send(group_name_for(room_id), {"type": ASR_TEXT_EVENT, "text": text})
 
 
+def unknown_words_for(utterance) -> list[str]:
+    """Слова фразы без проверенного жеста (дактиль) для преподавателя."""
+    unknown = (utterance.glosses or {}).get("unknown") or []
+    return [str(word) for word in unknown if str(word).strip()]
+
+
 def broadcast_utterance(utterance) -> None:
-    """Разослать сохранённую фразу с глоссами и ссылками на клипы."""
+    """Разослать сохранённую фразу с глоссами и ссылками на клипы.
+
+    Вместе с фразой уходит ``unknown_words``: consumer отдаёт его только
+    преподавателю, студент продолжает получать лишь текст и клипы.
+    """
+    group = group_name_for(utterance.room_id)
+    _send(group, {"type": UTTERANCE_EVENT, "utterance": utterance_event(utterance)})
     _send(
-        group_name_for(utterance.room_id),
-        {"type": UTTERANCE_EVENT, "utterance": utterance_event(utterance)},
+        group,
+        {
+            "type": UNKNOWN_WORDS_EVENT,
+            "words": unknown_words_for(utterance),
+            "utterance_id": getattr(utterance, "pk", None),
+        },
     )

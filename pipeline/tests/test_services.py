@@ -1,5 +1,7 @@
 """Сервис E1: сохранение фразы и упрощённые глоссы."""
 
+from datetime import timedelta
+
 import pytest
 from django.utils import timezone
 
@@ -8,6 +10,8 @@ from pipeline.models import Utterance
 from pipeline.services import (
     UtteranceValidationError,
     create_utterance,
+    lag_level,
+    record_display_started,
     sign_language_for_room,
     verified_sign_glosses,
 )
@@ -152,3 +156,66 @@ def test_empty_phrase_does_not_touch_unknown_queue(room):
         create_utterance(room, "")
 
     assert UnknownWord.objects.count() == 0
+
+
+@pytest.mark.parametrize(
+    ("lag_ms", "expected"),
+    [
+        (0, "green"),
+        (5_000, "green"),
+        (5_001, "yellow"),
+        (10_000, "yellow"),
+        (10_001, "red"),
+    ],
+)
+def test_lag_level_thresholds(lag_ms, expected):
+    """FR-15: зелёный ≤5 с, жёлтый ≤10 с, красный выше 10 с."""
+    assert lag_level(lag_ms) == expected
+
+
+def test_display_started_persists_lag_and_sends_level(room):
+    started_at = timezone.now() - timedelta(seconds=6)
+    utterance = create_utterance(room, "Учебник", started_at=started_at)
+
+    status = record_display_started(
+        room.pk,
+        utterance.pk,
+        received_at=started_at + timedelta(seconds=6),
+    )
+
+    utterance.refresh_from_db()
+    assert utterance.display_lag_ms == 6_000
+    assert status is not None
+    assert status.lag_ms == 6_000
+    assert status.level == "yellow"
+    assert utterance.as_event()["display_lag_ms"] == 6_000
+
+
+def test_display_started_is_idempotent(room):
+    started_at = timezone.now() - timedelta(seconds=2)
+    utterance = create_utterance(room, "Учебник", started_at=started_at)
+
+    record_display_started(
+        room.pk,
+        utterance.pk,
+        received_at=started_at + timedelta(seconds=2),
+    )
+    status = record_display_started(
+        room.pk,
+        utterance.pk,
+        received_at=started_at + timedelta(seconds=20),
+    )
+
+    utterance.refresh_from_db()
+    assert utterance.display_lag_ms == 2_000
+    assert status is not None
+    assert status.level == "green"
+
+
+def test_display_started_from_foreign_room_is_ignored(room, owner):
+    other_room = Room.objects.create(owner=owner)
+    utterance = create_utterance(other_room, "Учебник")
+
+    assert record_display_started(room.pk, utterance.pk) is None
+    utterance.refresh_from_db()
+    assert utterance.display_lag_ms is None

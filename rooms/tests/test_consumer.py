@@ -6,15 +6,19 @@
 """
 
 import asyncio
+from datetime import timedelta
 
 import pytest
 from channels.db import database_sync_to_async
+from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.cache import cache
 from django.db import connections
+from django.utils import timezone
 
 from config.asgi import application
+from pipeline.models import Utterance
 from rooms import presence
 from rooms.models import Participant, Room
 from rooms.services import GUEST_ROOMS_SESSION_KEY, GUEST_SESSION_KEY_SESSION_KEY
@@ -489,5 +493,74 @@ def test_chat_rate_limit(websocket_settings, open_room, settings):
         assert blocked == {"type": "chat_error", "error": "rate_limited", "retry_after": 5}
 
         await client.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_display_started_updates_lag_and_notifies_teacher_only(
+    websocket_settings, open_room, owner
+):
+    teacher_cookie = make_staff_session_cookie(owner)
+    student_cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        started_at = timezone.now() - timedelta(seconds=12)
+        utterance = await database_sync_to_async(Utterance.objects.create)(
+            room=open_room,
+            seq=1,
+            text="Учебник",
+            started_at=started_at,
+        )
+
+        teacher = make_communicator(open_room.join_code, teacher_cookie)
+        await connect_guest(teacher)
+        student = make_communicator(open_room.join_code, student_cookie)
+        await connect_guest(student)
+
+        await student.send_json_to(
+            {"type": "display_started", "utterance_id": utterance.pk, "ts": None}
+        )
+
+        event = await receive_type(teacher, "lag_status")
+        assert event["level"] == "red"
+        assert 11_000 <= event["lag_ms"] < 20_000
+
+        # Студент событие не получает: следующим ответом на ping должен быть pong.
+        await student.send_json_to({"type": "ping"})
+        assert await student.receive_json_from(timeout=1.0) == {"type": "pong"}
+
+        saved = await database_sync_to_async(Utterance.objects.get)(pk=utterance.pk)
+        assert saved.display_lag_ms == event["lag_ms"]
+
+        await teacher.disconnect()
+        await student.disconnect()
+
+    asyncio.run(run_scenario(scenario))
+
+
+def test_unknown_words_reach_only_teacher(websocket_settings, open_room, owner):
+    teacher_cookie = make_staff_session_cookie(owner)
+    student_cookie = make_guest_session_cookie(open_room)
+
+    async def scenario() -> None:
+        teacher = make_communicator(open_room.join_code, teacher_cookie)
+        await connect_guest(teacher)
+        student = make_communicator(open_room.join_code, student_cookie)
+        await connect_guest(student)
+
+        await get_channel_layer().group_send(
+            f"room_{open_room.pk}",
+            {"type": "unknown.words", "words": ["Иванов", "Петров"]},
+        )
+
+        event = await receive_type(teacher, "unknown_words")
+        assert event["words"] == ["Иванов", "Петров"]
+
+        # Студент не должен увидеть список слов без жеста.
+        await student.send_json_to({"type": "ping"})
+        assert await student.receive_json_from(timeout=1.0) == {"type": "pong"}
+
+        await teacher.disconnect()
+        await student.disconnect()
 
     asyncio.run(run_scenario(scenario))

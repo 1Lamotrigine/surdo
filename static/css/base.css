@@ -546,6 +546,106 @@ body.notification-flash[data-notification="chat"]::after {
   gap: 1.25rem;
 }
 
+/* E4: индикатор отставания (FR-15) и слова без жеста. */
+.teacher-monitor {
+  display: grid;
+  gap: 1rem;
+}
+
+.lag-panel,
+.unknown-panel {
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.lag-panel {
+  border-left-width: 0.5rem;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.lag-panel .eyebrow {
+  margin-bottom: 0.35rem;
+}
+
+.lag-value {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.lag-hint {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+.lag-panel[data-level="idle"] {
+  border-left-color: var(--border);
+}
+
+.lag-panel[data-level="green"] {
+  border-left-color: #15803d;
+  background: #f0fdf4;
+}
+
+.lag-panel[data-level="green"] .lag-value {
+  color: #14532d;
+}
+
+.lag-panel[data-level="yellow"] {
+  border-left-color: #d97706;
+  background: #fffbeb;
+}
+
+.lag-panel[data-level="yellow"] .lag-value {
+  color: #78350f;
+}
+
+.lag-panel[data-level="red"] {
+  border-left-color: #b91c1c;
+  background: #fef2f2;
+}
+
+.lag-panel[data-level="red"] .lag-value {
+  color: #7f1d1d;
+}
+
+.lag-panel[data-level="red"] .lag-hint {
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+.unknown-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.unknown-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unknown-word {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid #d97706;
+  border-radius: 999px;
+  background: #fffbeb;
+  color: #78350f;
+  font-size: 0.9rem;
+}
+
+.unknown-word-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent);
