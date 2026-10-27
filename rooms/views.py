@@ -5,8 +5,16 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_http_methods, require_POST
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from pipeline.queue import submit_text
+from pipeline.services import (
+    MAX_UTTERANCE_TEXT_LENGTH,
+    UtteranceValidationError,
+    normalize_text,
+    recent_room_utterances,
+)
 from rooms.forms import GuestNameForm, RoomForm
 from rooms.management import close_room, remove_participant, rotate_join_code
 from rooms.models import Participant, Room
@@ -73,22 +81,114 @@ def room_detail(request: HttpRequest, join_code: str):
     )
 
 
+def _phrase_feed_context(room: Room) -> dict:
+    phrases = recent_room_utterances(room)
+    latest_unknown: list[str] = []
+    if phrases:
+        latest_unknown = [
+            str(word)
+            for word in (phrases[-1].glosses.get("unknown") or [])
+            if str(word).strip()
+        ]
+    return {"phrases": phrases, "latest_unknown_words": latest_unknown}
+
+
+def _phrase_form_context(
+    room: Room,
+    *,
+    text: str = "",
+    error: str = "",
+    status: str = "",
+) -> dict:
+    return {
+        "room": room,
+        "text": text,
+        "error": error,
+        "status": status,
+        "max_text_length": MAX_UTTERANCE_TEXT_LENGTH,
+    }
+
+
 @room_creator_required
 def room_live(request: HttpRequest, join_code: str):
-    """Панель преподавателя: QR, ID, чат и участники в реальном времени."""
+    """Панель преподавателя: ввод фраз, лента, отставание, чат и участники (E5)."""
+    room = _get_room_or_404(join_code)
+    if not _can_view_room(request.user, room):
+        raise PermissionDenied("Нет доступа к этой комнате.")
+
+    context = {
+        "room": room,
+        "join_url": build_join_url(request, room.join_code),
+        "qr_svg": room_qr_svg(request, room),
+        **_phrase_form_context(room),
+        **_phrase_feed_context(room),
+    }
+    return render(request, "rooms/live.html", context)
+
+
+@require_GET
+@room_creator_required
+def room_live_feed(request: HttpRequest, join_code: str):
+    """HTMX-фрагмент ленты фраз: последние ``Utterance`` комнаты."""
     room = _get_room_or_404(join_code)
     if not _can_view_room(request.user, room):
         raise PermissionDenied("Нет доступа к этой комнате.")
 
     return render(
         request,
-        "rooms/live.html",
-        {
-            "room": room,
-            "join_url": build_join_url(request, room.join_code),
-            "qr_svg": room_qr_svg(request, room),
-        },
+        "rooms/_phrase_feed.html",
+        {"room": room, **_phrase_feed_context(room)},
     )
+
+
+@require_POST
+@room_creator_required
+def room_live_phrase(request: HttpRequest, join_code: str):
+    """Принять фразу из формы преподавателя и вернуть HTMX-фрагмент формы.
+
+    Текст проходит ту же проверку, что и JSON API E2, и ставится в фоновую
+    очередь. HTML-ответ нужен для HTMX; без него форма работает как обычный
+    POST с редиректом и сообщением.
+    """
+    room = _get_room_or_404(join_code)
+    if not _can_view_room(request.user, room):
+        raise PermissionDenied("Нет доступа к этой комнате.")
+
+    raw_text = request.POST.get("text", "")
+    error = ""
+    status = ""
+    if room.is_closed:
+        error = "Комната закрыта: новые фразы отправить нельзя."
+    else:
+        try:
+            clean_text = normalize_text(raw_text)
+        except UtteranceValidationError as exc:
+            error = str(exc)
+        else:
+            try:
+                submit_text(room.pk, clean_text, started_at=timezone.now())
+            except RuntimeError:
+                error = "Очередь обработки недоступна. Попробуйте ещё раз."
+            else:
+                status = "Фраза поставлена в очередь."
+                raw_text = ""
+
+    is_htmx = request.headers.get("HX-Request") == "true"
+    if not is_htmx:
+        if error:
+            messages.error(request, error)
+        else:
+            messages.success(request, status)
+        return redirect("rooms:live", join_code=room.join_code)
+
+    response = render(
+        request,
+        "rooms/_phrase_form.html",
+        _phrase_form_context(room, text=raw_text, error=error, status=status),
+    )
+    if status:
+        response["HX-Trigger"] = "phrase-saved"
+    return response
 
 
 @require_POST

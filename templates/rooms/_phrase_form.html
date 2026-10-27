@@ -1,0 +1,52 @@
+{% comment %}
+Форма ввода фразы преподавателем (E5). HTMX заменяет весь блок после ответа,
+поэтому текст, ошибка и статус живут в одном фрагменте.
+{% endcomment %}
+<div id="teacher-phrase-form" class="phrase-composer" data-phrase-composer>
+  <form
+    method="post"
+    action="{% url 'rooms:live-phrase' join_code=room.join_code %}"
+    hx-post="{% url 'rooms:live-phrase' join_code=room.join_code %}"
+    hx-target="#teacher-phrase-form"
+    hx-swap="outerHTML"
+    hx-disabled-elt="find button"
+  >
+    {% csrf_token %}
+    <label class="phrase-composer-label" for="teacher-phrase-text">
+      Фраза для показа студентам
+    </label>
+    <div class="phrase-composer-row">
+      <textarea
+        id="teacher-phrase-text"
+        class="phrase-composer-input"
+        name="text"
+        rows="3"
+        maxlength="{{ max_text_length }}"
+        placeholder="Например: Откройте учебник на странице 12"
+        autocomplete="off"
+        {% if room.is_closed %}disabled{% endif %}
+      >{{ text }}</textarea>
+      <button class="button" type="submit" {% if room.is_closed %}disabled{% endif %}>
+        Показать
+      </button>
+    </div>
+    <p class="phrase-composer-hint">
+      {% if room.is_closed %}
+        Комната закрыта: новые фразы отправить нельзя.
+      {% else %}
+        Текст сразу появится у студента и превратится в субтитры и жесты.
+      {% endif %}
+    </p>
+  </form>
+
+  {% if status %}
+    <p class="phrase-composer-status" data-phrase-status data-state="success" role="status">
+      {{ status }}
+    </p>
+  {% endif %}
+  {% if error %}
+    <p class="phrase-composer-status" data-phrase-status data-state="error" role="alert">
+      {{ error }}
+    </p>
+  {% endif %}
+</div>

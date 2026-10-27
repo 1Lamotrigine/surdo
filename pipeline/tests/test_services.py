@@ -11,6 +11,7 @@ from pipeline.services import (
     UtteranceValidationError,
     create_utterance,
     lag_level,
+    recent_room_utterances,
     record_display_started,
     sign_language_for_room,
     verified_sign_glosses,
@@ -219,3 +220,15 @@ def test_display_started_from_foreign_room_is_ignored(room, owner):
     assert record_display_started(room.pk, utterance.pk) is None
     utterance.refresh_from_db()
     assert utterance.display_lag_ms is None
+
+
+def test_recent_room_utterances_returns_last_phrases_in_order(room, owner):
+    other_room = Room.objects.create(owner=owner)
+    for index in range(3):
+        create_utterance(room, f"Фраза {index}")
+    create_utterance(other_room, "Чужая фраза")
+
+    phrases = recent_room_utterances(room, limit=2)
+
+    assert [utterance.seq for utterance in phrases] == [2, 3]
+    assert [utterance.text for utterance in phrases] == ["Фраза 1", "Фраза 2"]

@@ -48,6 +48,11 @@
 
     <div class="teacher-live-grid">
       <div class="teacher-live-main">
+        {% include "rooms/_phrase_form.html" %}
+        {% include "rooms/_phrase_feed.html" %}
+      </div>
+
+      <div class="teacher-live-side">
         <div class="teacher-monitor">
           <div class="lag-panel" data-lag-panel data-level="idle" aria-live="polite">
             <p class="eyebrow">Отставание аватара</p>
@@ -58,13 +63,17 @@
           <aside class="unknown-panel" aria-labelledby="unknown-title">
             <h2 id="unknown-title">Слова без жеста</h2>
             <ul class="unknown-list" data-unknown-words aria-live="polite">
-              <li class="unknown-word-empty">Пока нет.</li>
+              {% if latest_unknown_words %}
+                {% for word in latest_unknown_words %}
+                  <li class="unknown-word">{{ word }}</li>
+                {% endfor %}
+              {% else %}
+                <li class="unknown-word-empty">Пока нет.</li>
+              {% endif %}
             </ul>
           </aside>
         </div>
-      </div>
 
-      <div class="teacher-live-side">
         {% include "rooms/_chat.html" %}
 
         <aside class="presence-panel" aria-labelledby="presence-title">

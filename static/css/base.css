@@ -546,6 +546,148 @@ body.notification-flash[data-notification="chat"]::after {
   gap: 1.25rem;
 }
 
+/* E5: ввод фразы и лента преподавателя. */
+.phrase-composer,
+.phrase-feed {
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.phrase-composer-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.phrase-composer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.phrase-composer-input {
+  width: 100%;
+  min-height: 5.5rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.phrase-composer-input:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.phrase-composer-hint,
+.phrase-composer-status {
+  margin: 0.65rem 0 0;
+  font-size: 0.9rem;
+}
+
+.phrase-composer-hint {
+  color: var(--muted);
+}
+
+.phrase-composer-status[data-state="success"] {
+  color: #14532d;
+  font-weight: 600;
+}
+
+.phrase-composer-status[data-state="error"] {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.phrase-feed {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.phrase-feed-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.phrase-feed-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.phrase-feed-count {
+  min-width: 2rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.phrase-feed-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.phrase-feed-item {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: #fff;
+}
+
+.phrase-feed-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.phrase-feed-seq {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.phrase-feed-flag {
+  color: #78350f;
+}
+
+.phrase-feed-text {
+  margin: 0.35rem 0 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.phrase-feed-unknown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.phrase-feed-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
 /* E4: индикатор отставания (FR-15) и слова без жеста. */
 .teacher-monitor {
   display: grid;
@@ -1171,7 +1313,8 @@ button:focus-visible {
 
   .room-grid,
   .student-columns,
-  .teacher-live-grid {
+  .teacher-live-grid,
+  .phrase-composer-row {
     grid-template-columns: 1fr;
   }
 

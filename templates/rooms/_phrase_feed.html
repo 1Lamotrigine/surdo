@@ -1,0 +1,48 @@
+{% comment %}
+Лента фраз преподавателя (E5). HTMX обновляет её после отправки формы, по
+событию из WebSocket и раз в несколько секунд как запасной вариант.
+{% endcomment %}
+<section
+  id="teacher-phrase-feed"
+  class="phrase-feed"
+  data-phrase-feed
+  aria-labelledby="phrase-feed-title"
+  hx-get="{% url 'rooms:live-feed' join_code=room.join_code %}"
+  hx-trigger="every 3s, phrase-saved from:body"
+  hx-swap="outerHTML"
+>
+  <div class="phrase-feed-head">
+    <h2 id="phrase-feed-title">Лента фраз</h2>
+    <span class="phrase-feed-count">{{ phrases|length }}</span>
+  </div>
+
+  {% if phrases %}
+    <ol class="phrase-feed-list">
+      {% for utterance in phrases %}
+        <li class="phrase-feed-item">
+          <div class="phrase-feed-meta">
+            <span class="phrase-feed-seq">#{{ utterance.seq }}</span>
+            <time datetime="{{ utterance.started_at|date:'c' }}">
+              {{ utterance.started_at|date:"H:i:s" }}
+            </time>
+            {% if utterance.degraded %}
+              <span class="phrase-feed-flag">только субтитры</span>
+            {% endif %}
+          </div>
+          <p class="phrase-feed-text">{{ utterance.text }}</p>
+          {% if utterance.glosses.unknown %}
+            <ul class="phrase-feed-unknown" aria-label="Слова без жеста">
+              {% for word in utterance.glosses.unknown %}
+                <li class="unknown-word">{{ word }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="phrase-feed-empty">
+      Фраз пока нет. Напишите первую — она появится здесь и у студента.
+    </p>
+  {% endif %}
+</section>

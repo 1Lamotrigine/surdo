@@ -380,6 +380,10 @@ export function setupRoomLive(root: HTMLElement): void {
         if (utterance && utterance.seq > lastSeq) {
           lastSeq = utterance.seq;
           notifyStudent(notificationKindFor({ type: "utterance" }, isStudentView));
+          if (isTeacherView) {
+            // E5: лента фраз обновляется сразу, не дожидаясь опроса HTMX.
+            document.body.dispatchEvent(new Event("phrase-saved"));
+          }
           getPhrasePlayer()
             ?.then((player) => {
               player.enqueue(utterance);

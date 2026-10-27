@@ -26,6 +26,9 @@ from rooms.models import Room
 # Разумный предел текста одной фразы: защищает JSONField и очередь от мусора.
 MAX_UTTERANCE_TEXT_LENGTH = 2000
 
+# Сколько последних фраз показывает лента преподавателя (E5).
+PHRASE_FEED_LIMIT = 20
+
 # Язык комнаты (речь) → язык жестов, по которому ищем словарь.
 SIGN_LANG_BY_ROOM_LANG = {
     Room.Language.RU: Language.RSL,
@@ -220,3 +223,11 @@ def create_utterance(
             record_unknown_words(unknown_lemmas, lang=sign_lang)
 
     return utterance
+
+
+def recent_room_utterances(
+    room: Room, *, limit: int = PHRASE_FEED_LIMIT
+) -> list[Utterance]:
+    """Последние фразы комнаты по возрастанию ``seq`` для ленты преподавателя."""
+    queryset = Utterance.objects.filter(room=room).order_by("-seq")
+    return list(queryset[: max(1, limit)])[::-1]
