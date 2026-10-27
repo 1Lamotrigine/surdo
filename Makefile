@@ -40,7 +40,9 @@ test: .env client-build
 	$(COMPOSE) up -d db
 	@echo "Ожидание PostgreSQL..."
 	@until $(COMPOSE) exec -T db pg_isready -U app -d app >/dev/null 2>&1; do sleep 1; done
-	DATABASE_URL="postgres://app:$(DB_PASSWORD)@127.0.0.1:55432/app" $(PYTHON) -m pytest
+	# REDIS_URL пуст: тесты используют локальный кэш и in-memory channel layer,
+	# не требуя поднятого Redis на хосте.
+	DATABASE_URL="postgres://app:$(DB_PASSWORD)@127.0.0.1:55432/app" REDIS_URL="" $(PYTHON) -m pytest
 
 setup: .env
 	uv venv --python 3.12 .venv

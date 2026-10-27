@@ -4,20 +4,36 @@
 
 {% block content %}
   <section class="hero">
-    <p class="eyebrow">Прототип · этап A6</p>
+    <p class="eyebrow">Прототип · этап A7</p>
     <h1>Лекция с аватаром<br>и субтитрами</h1>
     <p class="lead">
       Преподаватель говорит в микрофон, аватар в браузере показывает фразу жестами,
       студенты читают субтитры и задают вопросы в чат. Ничего устанавливать не нужно.
     </p>
 
+    <form class="join-form" method="post" action="{% url 'home' %}" novalidate>
+      {% csrf_token %}
+      <div class="join-field">
+        {{ join_form.join_code.label_tag }}
+        {{ join_form.join_code }}
+      </div>
+      <button class="button" type="submit">Войти в комнату</button>
+    </form>
+    {% for error in join_form.join_code.errors %}
+      <p class="field-error" role="alert">{{ error }}</p>
+    {% endfor %}
+    <p class="join-hint">
+      Отсканируйте QR-код у преподавателя или введите ID комнаты.
+      Регистрация не нужна.
+    </p>
+
     <div class="hero-actions">
       {% if user.is_authenticated %}
         {% if user.is_teacher or user.is_admin %}
-          <a class="button" href="{% url 'rooms:create' %}">Создать комнату</a>
+          <a class="button button-secondary" href="{% url 'rooms:create' %}">Создать комнату</a>
         {% endif %}
       {% else %}
-        <a class="button" href="{% url 'accounts:login' %}">Войти и создать комнату</a>
+        <a class="button button-secondary" href="{% url 'accounts:login' %}">Войти преподавателю</a>
       {% endif %}
     </div>
   </section>
@@ -28,17 +44,17 @@
       <ul>
         <li>Пользователи, роли и вход по email.</li>
         <li>Комнаты с коротким ID, QR-кодом и крупным режимом для проектора.</li>
+        <li>Вход студента по ID и имени без регистрации.</li>
         <li>Vite, TypeScript и HTMX в клиенте.</li>
-        <li>Docker Compose: web, PostgreSQL, Redis, Caddy.</li>
       </ul>
     </article>
 
     <article class="card">
       <h2>Дальше</h2>
       <ul>
-        <li>A7 — вход студента по ID и имени.</li>
         <li>A8 — WebSocket, presence и изоляция комнат.</li>
         <li>A9 — чат комнаты.</li>
+        <li>A10 — закрытие комнаты и смена ID.</li>
       </ul>
     </article>
 

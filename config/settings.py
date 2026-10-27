@@ -88,6 +88,27 @@ else:
         "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
     }
 
+# Кэш используется для rate limit (перебор кода комнаты, чат, фразы).
+# С Redis счётчики общие для всех процессов; без него — локальный кэш процесса.
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "gluho-nemye",
+        }
+    }
+
+# Ограничение перебора кода комнаты: попыток за окно на IP.
+JOIN_RATE_LIMIT_ATTEMPTS = int(os.environ.get("JOIN_RATE_LIMIT_ATTEMPTS", "10"))
+JOIN_RATE_LIMIT_WINDOW = int(os.environ.get("JOIN_RATE_LIMIT_WINDOW", "60"))
+
 DATABASES = {
     "default": dj_database_url.parse(
         os.environ.get(

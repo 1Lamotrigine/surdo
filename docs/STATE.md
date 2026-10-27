@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**A6 — страница создания комнаты и QR: готов.**
+**A7 — вход студента: готов.**
 
 ## Что готово
 
@@ -54,6 +54,14 @@
 - **Страница комнаты (A6):** `GET /rooms/<code>/` показывает крупный ID, QR,
   абсолютную ссылку, копирование в буфер обмена и кнопку «Крупный режим» для
   проектора (fullscreen + упрощённый вид, выход по Esc).
+- **Участники (A7):** модель `rooms.Participant` (`room`, `user` или `guest_name`,
+  `session_key`, `joined_at`, `removed_at`) и инлайны в админке комнаты.
+- **Вход студента (A7):** форма ID на главной (`POST /`), страница
+  `GET/POST /r/<code>/` с вводом имени и согласием на обработку данных,
+  гостевая Django-сессия, страница `GET /r/<code>/live/`. Неверный ID → 404,
+  закрытая комната → 410.
+- **Rate limit (A7):** перебор ID ограничен через `django.core.cache`
+  (`JOIN_RATE_LIMIT_ATTEMPTS`/`JOIN_RATE_LIMIT_WINDOW` на IP), при превышении 429.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -73,7 +81,9 @@
 | Создание комнаты | `GET/POST /rooms/new/` → `rooms.views.create_room_view` |
 | Страница комнаты (QR + ID) | `GET /rooms/<code>/` → `rooms.views.room_detail` |
 | API создания комнаты | `POST /api/rooms/` → `rooms.api.create_room_api` |
-| Ссылка из QR | `GET /r/<code>/` (страница входа студента — этап A7) |
+| Вход по ID (форма главной) | `POST /` → `config.views.home` |
+| Вход студента по ссылке/QR | `GET/POST /r/<code>/` → `rooms.views.room_join` |
+| Комната студента | `GET /r/<code>/live/` → `rooms.views.room_student` |
 | Админка | `GET /admin/` |
 | WebSocket (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
@@ -101,7 +111,8 @@
 - `rooms/tests/` — формат и алфавит `join_code`, автогенерация кода, уникальность
   среди открытых комнат, повторное использование после закрытия, идемпотентное
   закрытие, повторы сервиса при коллизии, QR и ссылка `/r/<code>/`, страницы
-  создания/просмотра комнаты, доступ по ролям, JSON API создания.
+  создания/просмотра комнаты, доступ по ролям, JSON API создания, вход студента
+  (гостевая сессия, 404/410/429, name-валидация), rate limit и модель участника.
 - Тесты WebSocket синхронные: сценарий целиком выполняется в `asyncio.run`,
   `CHANNEL_LAYERS` на время теста подменяется на in-memory через `settings`.
 
@@ -133,24 +144,32 @@
   Ссылка внутри QR собирается из запроса, а маршрут всегда `/r/<ID>/`.
 - Создавать и смотреть комнату может только `teacher` (владелец) или `admin`;
   редактор получает 403, гость — редирект на вход.
+- Маршруты студента живут в корне (`/r/<code>/`), преподавателя — под `/rooms/`.
+  Так ссылка из QR-кода (`/r/<ID>/`) остаётся короткой и не зависит от префикса
+  приложения.
+- Кэш (`CACHES`) и channel layer разделены: счётчики rate limit идут через кэш
+  (Redis при `REDIS_URL`), presence появится на A8 через channel layer.
+- `make test` запускается без `REDIS_URL`, поэтому тесты используют локальный кэш
+  и in-memory channel layer и не требуют Redis на хосте.
 
-## Проверка A6
+## Проверка A7
 
 ```bash
-make check          # ruff + tsc + vite build + 61 тест — зелёный
+make check          # ruff + tsc + vite build + 79 тестов — зелёный
 make up && make migrate
-# вход преподавателем → /rooms/new/ → POST → /rooms/<code>/ с QR и крупным режимом
+# главная: ввод ID → /r/<code>/ → ввод имени → /r/<code>/live/
 ```
 
-Проверено вручную: преподаватель создаёт комнату на `/rooms/new/`, после
-редиректа на `/rooms/<code>/` страница отдаёт inline SVG QR, крупный ID и ссылку
-`http://<host>/r/<code>/`; `POST /api/rooms/` отвечает `201` с `join_code` и
-`join_url`. Тесты проверяют, что QR-ссылка содержит `/r/<code>/`, доступ по ролям
-и 404 для неизвестного кода.
+Проверено вручную: `POST /` с ID (в нижнем регистре) редиректит на `/r/<code>/`;
+страница входа просит имя; после отправки имени создаётся `Participant` с
+`guest_name` и `session_key`, а `/r/<code>/live/` показывает имя. Неверный ID даёт
+404, закрытая комната — 410, превышение лимита попыток — 429. Rate limit проверен
+и на Redis (`redis://127.0.0.1:6380`), и на локальном кэше.
 
 ## Дальше
 
-**A7 — вход студента:** главная с полем ID, страница `/r/<code>/`, ввод имени,
-гостевая сессия, rate limit через Redis. Критерий: тесты неверного ID, закрытой
-комнаты и лимита перебора. Читать: `docs/spec/requirements.md` (раздел 3.1),
-`docs/spec/db-schema.md`, `docs/spec/ws-events.md`.
+**A8 — `RoomConsumer`:** проверка кода и сессии в `connect()`, группа `room_<id>`,
+presence в Redis, событие `presence`. Критерий: без валидного кода соединение
+закрывается, два клиента видят друг друга, чужая комната недоступна. Читать:
+`docs/spec/ws-events.md`, `docs/spec/requirements.md` (раздел 3.1),
+`docs/spec/db-schema.md`.

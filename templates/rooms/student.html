@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ room.title }} · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="student-room">
+    <header class="student-head">
+      <p class="eyebrow">Комната {{ room.join_code }}</p>
+      <h1>{{ room.title }}</h1>
+      <p class="lead">
+        Вы вошли как <strong>{{ display_name }}</strong>. Аватар и субтитры
+        появятся здесь на следующих этапах.
+      </p>
+    </header>
+
+    <div class="student-stage" aria-label="Область аватара и субтитров">
+      <p class="student-placeholder">
+        Аватар и субтитры появятся после подключения блоков C и D.
+        Пока можно держать эту страницу открытой.
+      </p>
+    </div>
+
+    {% if room.demo_mode %}
+      <aside class="notice notice-warning">
+        Демо-режим: часть жестов ещё не проверена носителем.
+      </aside>
+    {% endif %}
+  </section>
+{% endblock %}
