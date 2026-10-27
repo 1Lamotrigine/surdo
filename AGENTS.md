@@ -17,6 +17,7 @@
 | Caddy | 2 |
 | Node.js (этап A3) | 22 LTS |
 | pytest / pytest-django / ruff | 9.1.1 / 4.14.0 / 0.17.3 |
+| daphne (только тесты Channels) | 4.2.3 |
 
 Версии зафиксированы в `requirements.txt`, `requirements-dev.txt` и Docker-образах.
 
@@ -25,7 +26,7 @@
 ```
 app/
 ├── manage.py
-├── config/          # настройки, urls, asgi/wsgi, служебные views
+├── config/          # настройки, urls, asgi/wsgi, routing, служебные views
 ├── accounts/        # пользователь и роли, вход (A4)
 ├── rooms/           # комнаты, участники, чат, consumer, QR (A5-A11)
 ├── dictionary/      # жесты, клипы, версии словаря, ревью (блок B)
