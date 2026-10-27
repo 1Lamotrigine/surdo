@@ -11,8 +11,8 @@
       <p class="eyebrow">Этап C1 · Three.js + three-vrm</p>
       <h1>Аватар в браузере</h1>
       <p class="lead">
-        Сцена WebGL, свет, камера и загрузка VRM. Клипы, ретаргет и блендинг
-        появятся на следующих этапах блока C.
+        Сцена WebGL, свет, камера, загрузка VRM, декодер клипов, ретаргет и
+        очередь с блендингом. Дактиль (C5) и субтитры (C6) появятся дальше.
       </p>
     </header>
 
@@ -33,18 +33,29 @@
     </form>
 
     <section class="avatar-clip" aria-labelledby="clip-title">
-      <h2 id="clip-title">Проигрывание клипа (C3)</h2>
+      <h2 id="clip-title">Проигрывание клипов и очередь (C3 + C4)</h2>
       <p>
-        После загрузки модели проиграйте синтетический демо-клип (машущие пальцы)
-        или выберите файл <code>.json.gz</code>, записанный инструментом редактора.
+        После загрузки модели проиграйте один синтетический демо-клип (машущие
+        пальцы), очередь из трёх клипов с crossfade и нейтральной позой между
+        фразами или выберите файлы <code>.json.gz</code>, записанные инструментом
+        редактора. Файлов можно выбрать несколько — они встанут в очередь.
       </p>
       <div class="avatar-actions">
         <button class="button" type="button" data-avatar-demo>Демо-клип</button>
+        <button class="button" type="button" data-avatar-queue>Очередь демо-клипов</button>
         <button class="button button-secondary" type="button" data-avatar-play>Играть</button>
         <button class="button button-secondary" type="button" data-avatar-stop>Стоп</button>
         <label class="avatar-field avatar-field-inline">
-          <span>Файл клипа (.json.gz)</span>
-          <input type="file" accept=".gz,.json,application/gzip" data-avatar-file>
+          <span>Скорость (0.6–1.3x)</span>
+          <input type="number" min="0.6" max="1.3" step="0.05" value="1" data-avatar-speed>
+        </label>
+        <label class="avatar-field avatar-field-inline">
+          <span>Пауза между фразами, мс</span>
+          <input type="number" min="0" step="50" value="250" data-avatar-gap>
+        </label>
+        <label class="avatar-field avatar-field-inline">
+          <span>Файлы клипов (.json.gz)</span>
+          <input type="file" accept=".gz,.json,application/gzip" multiple data-avatar-file>
         </label>
       </div>
       <p class="avatar-clip-status" data-clip-status aria-live="polite">

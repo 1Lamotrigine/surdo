@@ -22,6 +22,10 @@ def test_avatar_page_renders(client):
     assert "data-avatar-play" in html
     assert "data-avatar-stop" in html
     assert "data-avatar-file" in html
+    # C4: очередь клипов, блендинг, скорость и пауза между фразами.
+    assert "data-avatar-queue" in html
+    assert "data-avatar-speed" in html
+    assert "data-avatar-gap" in html
     # Точка входа клиента (собранный ассет или dev-сервер Vite).
     assert "avatar-page" in html
 

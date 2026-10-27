@@ -144,12 +144,17 @@ function faceFrame(): Point[] {
 }
 
 /** Числа кадров демо-клипа: раскрытие/сжатие пальцев и покачивание кисти. */
-function demoValues(frames: number): number[] {
+function demoValues(frames: number, variant = 0): number[] {
   const values: number[] = [];
+  // Варианты дают визуально разные клипы для демонстрации очереди (C4):
+  // разная амплитуда качания кисти, разная частота сгиба пальцев и фаза.
+  const waveAmp = [0.5, 0.35, 0.7][variant % 3];
+  const curlAmp = [0.5, 0.7, 0.3][variant % 3];
+  const phase0 = [0, Math.PI / 2, Math.PI][variant % 3];
   for (let f = 0; f < frames; f += 1) {
-    const phase = (f / frames) * Math.PI * 2;
-    const wave = 0.5 + 0.5 * Math.sin(phase);
-    const curl = 0.5 + 0.5 * Math.sin(phase * 2);
+    const phase = phase0 + (f / frames) * Math.PI * 2;
+    const wave = 0.5 + waveAmp * Math.sin(phase);
+    const curl = 0.5 + curlAmp * Math.sin(phase * 2);
     values.push(
       ...flatten(poseFrame(wave)),
       ...flatten(handFrame(curl, "left")),
@@ -171,12 +176,12 @@ function encodeFloat16(values: number[]): Uint8Array {
 /**
  * Собрать клип «машущая рука»: пальцы раскрываются и сжимаются, кисть чуть
  * покачивается. Возвращает объект клипа, готовый к загрузке через `decodeClip`
- * после gzip (см. `encodeDemoClip`).
+ * после gzip (см. `encodeDemoClip`). `variant` даёт разные жесты для очереди C4.
  */
-export function buildDemoClipPayload(frames = 45, fps = 30): Record<string, unknown> {
+export function buildDemoClipPayload(frames = 45, fps = 30, variant = 0): Record<string, unknown> {
   return {
     version: 1,
-    gloss: "ДЕМО",
+    gloss: variant === 0 ? "ДЕМО" : `ДЕМО-${variant + 1}`,
     fps,
     frames,
     layout: DEMO_LAYOUT,
@@ -185,11 +190,29 @@ export function buildDemoClipPayload(frames = 45, fps = 30): Record<string, unkn
 }
 
 /** Собрать готовый объект клипа с base64-данными (gzip в браузере). */
-export async function encodeDemoClip(frames = 45, fps = 30): Promise<Record<string, unknown>> {
-  const payload = buildDemoClipPayload(frames, fps);
-  const compressed = await gzip(encodeFloat16(demoValues(frames)));
+export async function encodeDemoClip(
+  frames = 45,
+  fps = 30,
+  variant = 0,
+): Promise<Record<string, unknown>> {
+  const payload = buildDemoClipPayload(frames, fps, variant);
+  const compressed = await gzip(encodeFloat16(demoValues(frames, variant)));
   payload.data = bytesToBase64(compressed);
   return payload;
+}
+
+/**
+ * Собрать очередь из нескольких демо-клипов (C4): разные жесты и разная длина.
+ * Тестовая страница проигрывает их подряд, чтобы вручную проверить crossfade и
+ * нейтральную позу между фразами.
+ */
+export async function encodeDemoQueue(): Promise<Record<string, unknown>[]> {
+  const specs = [
+    { frames: 40, variant: 0 },
+    { frames: 30, variant: 1 },
+    { frames: 50, variant: 2 },
+  ];
+  return Promise.all(specs.map((spec) => encodeDemoClip(spec.frames, 30, spec.variant)));
 }
 
 /** gzip через нативный `CompressionStream`. */

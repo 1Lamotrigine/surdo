@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decodeClipPayload } from "./clip";
-import { DEMO_LAYOUT, encodeDemoClip } from "./demo-clip";
+import { DEMO_LAYOUT, encodeDemoClip, encodeDemoQueue } from "./demo-clip";
 import { retargetFrame } from "./retarget";
 
 describe("encodeDemoClip", () => {
@@ -51,5 +51,29 @@ describe("encodeDemoClip", () => {
 
     expect(frame.face).not.toBeNull();
     expect(frame.face?.mouth.shape).toHaveProperty("A");
+  });
+
+  it("варианты дают разные глоссы и данные", async () => {
+    const first = await encodeDemoClip(6, 30, 0);
+    const second = await encodeDemoClip(6, 30, 1);
+    expect(first.gloss).toBe("ДЕМО");
+    expect(second.gloss).toBe("ДЕМО-2");
+    expect(first.data).not.toBe(second.data);
+  });
+
+  it("encodeDemoQueue собирает очередь из разных клипов (C4)", async () => {
+    const payloads = await encodeDemoQueue();
+    expect(payloads).toHaveLength(3);
+
+    const clips = await Promise.all(payloads.map((p) => decodeClipPayload(p)));
+    // Разная длина у клипов очереди видна в тестовой странице.
+    expect(clips[0].frames).toBe(40);
+    expect(clips[1].frames).toBe(30);
+    expect(clips[2].frames).toBe(50);
+    // Все клипы валидны и ретаргетятся.
+    for (const clip of clips) {
+      expect(clip.version).toBe(1);
+      expect(retargetFrame(clip, 0).hasPose).toBe(true);
+    }
   });
 });
