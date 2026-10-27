@@ -9,6 +9,7 @@ app_name = "dictionary"
 urlpatterns = [
     path("review/", views.review_queue, name="review-queue"),
     path("review/<int:sign_id>/", views.review_sign, name="review-sign"),
+    path("record/", views.record_gesture, name="record"),
     path("queue/", views.unknown_queue, name="unknown-queue"),
     path("queue/<int:word_id>/action/", views.unknown_word_action, name="unknown-word-action"),
 ]

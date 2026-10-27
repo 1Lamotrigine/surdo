@@ -19,6 +19,7 @@
 | Vite / TypeScript | 8.3.5 / 7.0.2 |
 | three / @pixiv/three-vrm / @types/three | 0.186.1 / 3.5.5 / 0.186.0 |
 | kalidokit | 1.1.5 |
+| @mediapipe/tasks-vision | 1.1.1 |
 | vitest / @types/node | 5.0.5 / 22.20.5 |
 | django-vite | 3.2.0 |
 | htmx | 2.0.11 |
@@ -94,6 +95,12 @@ app/
   `/rooms/<code>/close/`, `/rooms/<code>/rotate-code/`,
   `/rooms/<code>/participants/<id>/remove/`. Смена ID не меняет `room.id` —
   группа та же, старый код перестаёт находиться.
+- Инструмент записи жеста (D1): страница `/dictionary/record/` (`record_gesture`),
+  клиент `frontend/holistic.ts` + `frontend/skeleton.ts` + `frontend/record-page.ts`.
+  MediaPipe Tasks Vision (`@mediapipe/tasks-vision`) грузит WASM из
+  `static/dist/mediapipe` (копирует плагин `vite.config.ts`) и модель из
+  `MEDIAPIPE_HOLISTIC_MODEL_URL`; видео не отправляется на сервер. Запись клипа —
+  D2, отправка в API — D3, запись из очереди — D4.
 - Не меняй приложения вне задачи этапа. Не переписывай готовые тесты.
 - Один этап — одна ветка и один коммит.
 - Секреты только в `.env` (не коммитится). `.env.example` обновляется при

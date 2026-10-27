@@ -169,6 +169,14 @@ MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
 # файл модели выбирает человек (ТЗ 15.3), URL задаётся здесь или в поле на странице.
 AVATAR_MODEL_URL = os.environ.get("AVATAR_MODEL_URL", "")
 
+# Модель MediaPipe Holistic для инструмента записи (D1). По умолчанию — официальная
+# float16-модель Google; для офлайна укажите URL своего файла .task.
+MEDIAPIPE_HOLISTIC_MODEL_URL = os.environ.get(
+    "MEDIAPIPE_HOLISTIC_MODEL_URL",
+    "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/"
+    "holistic_landmarker/float16/1/holistic_landmarker.task",
+)
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "accounts.User"

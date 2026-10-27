@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib import messages
 from django.http import FileResponse, Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.templatetags.static import static
 from django.views.decorators.http import condition, require_http_methods
 
 from dictionary.models import Language, Sign, SignClip, SignStatus, UnknownWord
@@ -24,6 +26,21 @@ from services.clips import default_storage
 # Клипы неизменяемы (новая версия — новый файл), поэтому кэш надолго.
 CLIP_CACHE_CONTROL = "public, max-age=604800, immutable"
 CLIP_CONTENT_TYPE = "application/gzip"
+
+
+def _mediapipe_wasm_path() -> str:
+    """Каталог WASM MediaPipe: Vite dev-сервер или собранная статика.
+
+    В dev-режиме модули и WASM отдаёт Vite (`npm run dev`), в остальных случаях —
+    `static/dist/mediapipe`, куда плагин Vite копирует файлы при сборке.
+    """
+    config = settings.DJANGO_VITE["default"]
+    prefix = config.get("static_url_prefix", "dist")
+    if config.get("dev_mode"):
+        host = config.get("dev_server_host", "localhost")
+        port = config.get("dev_server_port", 5173)
+        return f"http://{host}:{port}/{settings.STATIC_URL.strip('/')}/{prefix}/mediapipe"
+    return static(f"{prefix}/mediapipe")
 
 
 def _get_clip(clip_id: int) -> SignClip | None:
@@ -158,3 +175,21 @@ def unknown_word_action(request: HttpRequest, word_id: int):
     else:
         messages.success(request, f"Слово «{word.lemma}» {verb}.")
     return redirect("dictionary:unknown-queue")
+
+
+@dictionary_required
+def record_gesture(request: HttpRequest):
+    """Инструмент записи жеста (D1): камера и предпросмотр скелета MediaPipe.
+
+    Пока это только просмотр: запись клипа, обрезка и отправка в API появятся
+    на этапах D2–D3. Страница доступна ролям словаря, как и остальные
+    инструменты редактора.
+    """
+    return render(
+        request,
+        "dictionary/record.html",
+        {
+            "model_url": settings.MEDIAPIPE_HOLISTIC_MODEL_URL,
+            "mediapipe_wasm_path": _mediapipe_wasm_path(),
+        },
+    )

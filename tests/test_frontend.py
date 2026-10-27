@@ -54,3 +54,19 @@ def test_manifest_contains_avatar_page_entry():
     assert entry.isEntry is True
     assert entry.file.startswith("assets/avatar-page-")
     assert entry.file.endswith(".js")
+
+
+def test_manifest_contains_record_page_entry():
+    """D1: инструмент записи жеста попадает в сборку и копирует WASM MediaPipe."""
+    config = DjangoViteConfig(
+        dev_mode=False,
+        static_url_prefix="dist",
+        manifest_path=MANIFEST_PATH,
+    )
+    client = DjangoViteAppClient(config)
+    entry = client.manifest.get("frontend/record-page.ts")
+
+    assert entry is not None
+    assert entry.isEntry is True
+    assert entry.file.startswith("assets/record-page-")
+    assert entry.file.endswith(".js")

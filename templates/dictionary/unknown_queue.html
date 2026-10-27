@@ -11,6 +11,10 @@
       начните с него: возьмите в работу, а после записи клипа пометьте записанным.
     </p>
 
+    <div class="record-actions">
+      <a class="button" href="{% url 'dictionary:record' %}">Записать жест с камеры</a>
+    </div>
+
     <form class="queue-filter" method="get">
       <label for="queue-lang">Язык:</label>
       <select id="queue-lang" name="lang" onchange="this.form.submit()">

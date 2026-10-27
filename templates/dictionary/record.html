@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% load static django_vite %}
+
+{% block title %}Запись жеста · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="record-page"
+           data-record-page
+           data-mediapipe-wasm="{{ mediapipe_wasm_path }}"
+           data-mediapipe-model-url="{{ model_url }}">
+    <header class="record-head">
+      <p class="eyebrow">Редактор словаря · этап D1</p>
+      <h1>Запись жеста с камеры</h1>
+      <p class="lead">
+        Включите камеру и встаньте так, чтобы в кадр попали лицо, корпус и обе
+        кисти. MediaPipe Holistic находит позу, лицо и пальцы прямо в браузере,
+        а поверх видео рисуется скелет. Видео не отправляется на сервер.
+      </p>
+    </header>
+
+    <div class="record-stage" data-record-stage>
+      <video class="record-video" data-record-video muted playsinline aria-label="Видео с камеры"></video>
+      <canvas class="record-overlay" data-record-canvas aria-hidden="true"></canvas>
+      <p class="record-placeholder">Камера выключена</p>
+    </div>
+
+    <p class="record-status" data-record-status data-state="idle" aria-live="polite">
+      Камера выключена
+    </p>
+
+    <div class="record-actions">
+      <button class="button" type="button" data-record-start>Включить камеру</button>
+      <button class="button button-secondary" type="button" data-record-stop disabled>
+        Остановить
+      </button>
+    </div>
+
+    <dl class="record-stats" aria-label="Показатели распознавания">
+      <div>
+        <dt>Скелет</dt>
+        <dd data-record-stats>Скелет не подключён</dd>
+      </div>
+      <div>
+        <dt>Кисти</dt>
+        <dd data-record-hands>Кисти: —</dd>
+      </div>
+    </dl>
+
+    <aside class="notice notice-warning">
+      <p>
+        Камера доступна только на <code>localhost</code> или по HTTPS. При первом
+        запуске браузер скачает WASM MediaPipe (~13 МБ) и модель Holistic; дальше
+        они берутся из кэша. Запись и обрезка клипа появятся на этапе D2.
+      </p>
+      {% if not model_url %}
+        <p>
+          Не задан URL модели Holistic. Укажите <code>MEDIAPIPE_HOLISTIC_MODEL_URL</code>
+          в окружении или в <code>.env</code>.
+        </p>
+      {% endif %}
+    </aside>
+
+    <aside class="record-hint">
+      <h2>Что проверить</h2>
+      <ul>
+        <li>Поднимите руку и пошевелите пальцами — линия кисти и фаланги повторяют движение без заметной задержки.</li>
+        <li>Наклоните голову — контур лица и брови следуют за мимикой.</li>
+        <li>Выйдите из кадра — предпросмотр остаётся, а строка показателей пишет, что человека нет.</li>
+      </ul>
+    </aside>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {% vite_asset 'frontend/record-page.ts' %}
+{% endblock %}

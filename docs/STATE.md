@@ -4,7 +4,7 @@
 
 ## Текущий этап
 
-**C8 — уведомления студента: готов.**
+**D1 — камера и MediaPipe Holistic: готов.**
 
 ## Что готово
 
@@ -13,7 +13,8 @@
 - Настройки из переменных окружения: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`,
   `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `MEDIA_ROOT`, `LOG_LEVEL`,
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
-  `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`.
+  `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`, `AVATAR_MODEL_URL`,
+  `MEDIAPIPE_HOLISTIC_MODEL_URL`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -350,6 +351,21 @@
   подсвечивают экран (CSS-анимация `body.notification-flash::after`) и дают
   короткую вибрацию там, где есть `navigator.vibrate`. История чата при
   переподключении не уведомляет; панель преподавателя не мигает.
+- **MediaPipe Holistic (D1):** `frontend/holistic.ts` лениво загружает
+  `@mediapipe/tasks-vision` (1.1.1), WASM из `static/dist/mediapipe` и модель
+  `holistic_landmarker.task`; при недоступности GPU повторяет создание на CPU,
+  а метки времени для режима VIDEO делает строго возрастающими.
+  `normalizeHolisticResult` приводит ответ к кадрам «поза / лицо / левая и правая
+  кисть» и тестируется без DOM.
+- **Предпросмотр скелета (D1):** `frontend/skeleton.ts` — чистые функции
+  `coverTransform`, `mapLandmark`, `skeletonSegments` и `drawSkeleton`. Учитывает
+  `object-fit: cover`, зеркальную камеру, порог видимости точек и рисует позу,
+  контур лица, глаза, брови, губы и обе кисти.
+- **Инструмент записи (D1):** страница `GET /dictionary/record/` (только роли
+  словаря) включает камеру по кнопке, показывает видео и скелет поверх него,
+  счётчик кадров и найденные кисти. Видео не уходит на сервер. WASM копируется
+  Vite-плагином, модель задаётся `MEDIAPIPE_HOLISTIC_MODEL_URL`; запись клипа —
+  этап D2.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -383,6 +399,7 @@
 | Очередь на проверке | `GET /dictionary/review/` → `dictionary.views.review_queue` |
 | Карточка жеста (решение) | `GET/POST /dictionary/review/<id>/` → `dictionary.views.review_sign` |
 | Очередь нераспознанных слов | `GET /dictionary/queue/` → `dictionary.views.unknown_queue` |
+| Запись жеста с камеры (D1) | `GET /dictionary/record/` → `dictionary.views.record_gesture` |
 | Действие со словом очереди | `POST /dictionary/queue/<id>/action/` → `dictionary.views.unknown_word_action` |
 | Закрыть комнату | `POST /rooms/<code>/close/` → `rooms.views.room_close` |
 | Сменить ID комнаты | `POST /rooms/<code>/rotate-code/` → `rooms.views.room_rotate_code` |
@@ -402,6 +419,7 @@
 | JS субтитров (C6) | `frontend/subtitles.ts` (`alignTokens`, `utteranceUnits`, `activeWordAt`, `SubtitleView`) |
 | JS настроек студента (C7) | `frontend/student-settings.ts` (`loadStudentSettings`, `saveStudentSettings`, `StudentSettingsView`) |
 | JS уведомлений и Wake Lock (C8) | `frontend/notifications.ts` (`notificationKindFor`, `vibrate`, `ScreenWakeLock`, `ScreenNotifier`) |
+| JS MediaPipe и скелета (D1) | `frontend/holistic.ts` (`HolisticDetector`, `normalizeHolisticResult`), `frontend/skeleton.ts`, `frontend/record-page.ts` |
 
 ## Клиент: режимы
 
@@ -415,13 +433,21 @@
 ## Тесты
 
 - `tests/test_smoke.py` — стартовая страница, health, HTMX-фрагмент.
-- `tests/test_frontend.py` — манифест Vite и URL собранного ассета, точка входа
-  тестовой страницы аватара (`frontend/avatar-page.ts`).
+- `tests/test_frontend.py` — манифест Vite и URL собранного ассета, точки входа
+  тестовой страницы аватара (`frontend/avatar-page.ts`) и записи жеста
+  (`frontend/record-page.ts`).
 - `tests/test_avatar_page.py` — страница `GET /avatar/`: рендер без входа,
   контейнер сцены и атрибуты модуля, передача `AVATAR_MODEL_URL` в шаблон и
   подсказка при пустой модели; поля настроек студента (C7).
 - `rooms/tests/test_join.py` — вход студента и страница комнаты; разметка
   уведомлений и Wake Lock (C8).
+- `dictionary/tests/test_record_page.py` — страница D1: вход, роли словаря,
+  разметка камеры/холста/кнопок, передача модели и пути WASM, ссылка из очереди
+  нераспознанных слов.
+- `frontend/holistic.test.ts` (vitest) — разбор ответа MediaPipe: вложенные и
+  плоские наборы, мусор, пустой кадр, определение кистей.
+- `frontend/skeleton.test.ts` (vitest) — геометрия предпросмотра: `object-fit:
+  cover`, зеркалирование, рёбра позы и кистей, порог видимости, фильтр групп.
 - `frontend/clip.test.ts` (vitest) — декодер формата клипа (C2): Float16 → Float32,
   base64, gzip, разбор `layout` и смещений, значения landmark'ов по кадрам,
   `pointAt`, ошибки (версия, `fps`, `frames`, `layout`, `data`, размер, не-gzip,
@@ -903,7 +929,7 @@
   импульс, чат — один), а без поддержки API просто не вызывается. Звука нет:
   НФТ требуют визуального дубля любой звуковой информации.
 
-## Проверка C8
+## Проверка C8 (на момент этапа)
 
 ```bash
 make check          # ruff + tsc + vitest (201) + pytest (341) + vite build — зелёный
@@ -916,11 +942,45 @@ Wake Lock и отказы браузера (`frontend/notifications.test.ts`), �
 панели преподавателя — экран подсвечивается, на Android срабатывает вибрация,
 в строке уведомления появляется «Ответ преподавателя в чате».
 
+## Проверка D1
+
+```bash
+make check          # ruff + tsc + vitest (216) + pytest (350) + vite build — зелёный
+```
+
+Автотесты покрывают разбор кадра Holistic и геометрию скелета
+(`frontend/holistic.test.ts`, `frontend/skeleton.test.ts`), доступ и разметку
+страницы записи (`dictionary/tests/test_record_page.py`), а также попадание
+точки входа и WASM в сборку (`tests/test_frontend.py`). Ручная проверка:
+войти редактором, открыть `/dictionary/queue/` и нажать «Записать жест с
+камеры», разрешить доступ. Скелет идёт за рукой и пальцами без заметной
+задержки, наклон головы повторяет контур лица, при уходе из кадра появляется
+«В кадре пока нет человека». В dev-режиме WASM отдаёт Vite; в production —
+WhiteNoise из `static/dist/mediapipe`.
+
+## Решения D1
+
+- MediaPipe выбран в варианте **Tasks Vision** (`HolisticLandmarker`), а не
+  устаревший пакет `@mediapipe/holistic`: модель и WASM версионируются вместе с
+  npm-зависимостью, а API поддерживает видео-режим и делегаты GPU/CPU.
+- Видео и landmarks не покидают браузер: на этом этапе сервер отдаёт только
+  страницу. Запись и отправка клипа начнутся в D2–D3.
+- Модель по умолчанию — официальная float16-модель Google по HTTPS, URL можно
+  заменить на свой для офлайн-развёртывания. WASM (SIMD и nosimd) копируется в
+  `static/dist/mediapipe` при `npm run build`; путь в dev и production
+  вычисляет `_mediapipe_wasm_path`.
+- Если GPU-делегат недоступен, детектор автоматически пересоздаётся на CPU.
+  Ошибка загрузки модели не выключает камеру: видео продолжает работать, а
+  статус объясняет, что скелет недоступен.
+- Страница доступна только редактору, эксперту и администратору — как остальные
+  инструменты словаря. Роль преподавателя получает 403.
+
 ## Дальше
 
-**C8 готов.** Блок C завершён. Следующий — блок D: инструмент записи жестов с
-камеры (FR-17–22), начиная с D1. Читать: `docs/spec/requirements.md` (3.5),
-`docs/spec/dictionary-process.md`, `docs/spec/clip-format.md`.
+**D1 готов.** Следующий — D2: запись клипа (старт/стоп, обрезка начала и конца,
+One Euro, упаковка в формат клипа) и проверка обратимости упаковки. Читать:
+`docs/spec/clip-format.md`, `docs/spec/requirements.md` (3.5), текущие
+`frontend/clip.ts`, `frontend/one-euro.ts`.
 
 
 Пополнение очереди из реальных занятий подключается в блоке **E**
