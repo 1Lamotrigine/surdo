@@ -1,15 +1,19 @@
 {% extends "base.html" %}
+{% load django_vite %}
 
 {% block title %}{{ room.title }} · ИИ-аватар сурдопереводчик{% endblock %}
 
 {% block content %}
-  <section class="student-room">
+  <section class="student-room" data-room-socket data-join-code="{{ room.join_code }}">
     <header class="student-head">
       <p class="eyebrow">Комната {{ room.join_code }}</p>
       <h1>{{ room.title }}</h1>
       <p class="lead">
         Вы вошли как <strong>{{ display_name }}</strong>. Аватар и субтитры
         появятся здесь на следующих этапах.
+      </p>
+      <p class="socket-status" data-socket-status data-state="loading" aria-live="polite">
+        Подключение…
       </p>
     </header>
 
@@ -20,10 +24,19 @@
       </p>
     </div>
 
+    <aside class="presence-panel" aria-labelledby="presence-title">
+      <h2 id="presence-title">В комнате</h2>
+      <ul class="presence-list" data-presence-list aria-live="polite"></ul>
+    </aside>
+
     {% if room.demo_mode %}
       <aside class="notice notice-warning">
         Демо-режим: часть жестов ещё не проверена носителем.
       </aside>
     {% endif %}
   </section>
+{% endblock %}
+
+{% block scripts %}
+  {% vite_asset 'frontend/room-socket.ts' %}
 {% endblock %}

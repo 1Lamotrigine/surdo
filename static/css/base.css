@@ -275,6 +275,51 @@ main {
   color: var(--muted);
 }
 
+.socket-status {
+  display: inline-block;
+  margin: 0.75rem 0 0;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.socket-status[data-state="ready"] {
+  border-color: #15803d;
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.socket-status[data-state="error"] {
+  border-color: #b91c1c;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.presence-panel {
+  padding: 1.25rem 1.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.presence-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.presence-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.presence-list:empty::after {
+  content: "Пока никого…";
+  color: var(--muted);
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent);
