@@ -39,3 +39,18 @@ def test_built_tags_point_to_static_dist():
 
     assert 'type="module"' in html
     assert f"{settings.STATIC_URL}dist/assets/main-" in html
+
+
+def test_manifest_contains_avatar_page_entry():
+    """C1: точка входа тестовой страницы аватара попадает в сборку."""
+    config = DjangoViteConfig(
+        dev_mode=False,
+        static_url_prefix="dist",
+        manifest_path=MANIFEST_PATH,
+    )
+    entry = DjangoViteAppClient(config).manifest.get("frontend/avatar-page.ts")
+
+    assert entry is not None
+    assert entry.isEntry is True
+    assert entry.file.startswith("assets/avatar-page-")
+    assert entry.file.endswith(".js")

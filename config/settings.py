@@ -118,6 +118,13 @@ CHAT_RATE_LIMIT_WINDOW = int(os.environ.get("CHAT_RATE_LIMIT_WINDOW", "5"))
 ROOM_PING_INTERVAL = int(os.environ.get("ROOM_PING_INTERVAL", "20"))
 ROOM_PING_TIMEOUT = int(os.environ.get("ROOM_PING_TIMEOUT", "60"))
 
+# Загрузка клипа жеста (формат — docs/spec/clip-format.md). Ограничения
+# защищают хранилище от битых и слишком больших файлов.
+CLIP_VERSION = int(os.environ.get("CLIP_VERSION", "1"))
+CLIP_MAX_SIZE_BYTES = int(os.environ.get("CLIP_MAX_SIZE_BYTES", str(2 * 1024 * 1024)))
+CLIP_MAX_FRAMES = int(os.environ.get("CLIP_MAX_FRAMES", "300"))
+CLIP_DEFAULT_FPS = int(os.environ.get("CLIP_DEFAULT_FPS", "30"))
+
 DATABASES = {
     "default": dj_database_url.parse(
         os.environ.get(
@@ -157,6 +164,10 @@ DJANGO_VITE = {
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
+
+# VRM-модель аватара (C1). Пусто — тестовая страница откроется без модели:
+# файл модели выбирает человек (ТЗ 15.3), URL задаётся здесь или в поле на странице.
+AVATAR_MODEL_URL = os.environ.get("AVATAR_MODEL_URL", "")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load django_vite %}
+
+{% block title %}Аватар (тест) · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="avatar-page"
+           data-avatar-page
+           data-avatar-model-url="{{ model_url }}">
+    <header class="avatar-head">
+      <p class="eyebrow">Этап C1 · Three.js + three-vrm</p>
+      <h1>Аватар в браузере</h1>
+      <p class="lead">
+        Сцена WebGL, свет, камера и загрузка VRM. Клипы, ретаргет и блендинг
+        появятся на следующих этапах блока C.
+      </p>
+    </header>
+
+    <div class="avatar-stage-wrap">
+      <div class="avatar-stage" data-avatar-stage aria-label="3D-аватар" role="img"></div>
+      <p class="avatar-status" data-avatar-status data-state="loading" aria-live="polite">
+        Загрузка…
+      </p>
+    </div>
+
+    <form class="avatar-form" data-avatar-form>
+      <label class="avatar-field">
+        <span>URL модели (.vrm)</span>
+        <input type="url" name="model_url" data-avatar-url
+               value="{{ model_url }}" placeholder="https://…/avatar.vrm">
+      </label>
+      <button class="button" type="submit">Загрузить модель</button>
+    </form>
+
+    {% if not model_url %}
+      <aside class="notice notice-warning">
+        Модель не задана. Укажите URL файла <code>.vrm</code> в поле или задайте
+        переменную окружения <code>AVATAR_MODEL_URL</code>. Сцена, камера и свет
+        уже работают без модели.
+      </aside>
+    {% endif %}
+
+    <p class="avatar-hint">
+      Рекомендации по модели: бесплатная VRM из VRoid Studio, лицензия модели
+      проверяется перед публикацией (ТЗ 5.4).
+    </p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {% vite_asset 'frontend/avatar-page.ts' %}
+{% endblock %}

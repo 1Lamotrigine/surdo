@@ -4,12 +4,12 @@
 
 ## Текущий этап
 
-**A11 — heartbeat и переподключение: готов.**
+**C1 — JS-модуль аватара: готов.**
 
 ## Что готово
 
 - Django-проект (`config`) и приложения `accounts`, `rooms`, `dictionary`, `pipeline`.
-- Пакет `services` (пока пустой, без Django-моделей).
+- Пакет `services` (без Django-моделей): `services.clips` — хранилище клипов.
 - Настройки из переменных окружения: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`,
   `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`, `REDIS_URL`, `MEDIA_ROOT`, `LOG_LEVEL`,
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
@@ -105,6 +105,117 @@
 - **События управления (A10):** `room_closed` и `participant_removed` — сервер
   шлёт их и закрывает соединение кодом 4403; клиент на 4403 не переподключается.
   При закрытии presence комнаты очищается, при удалении — только ключ участника.
+- **Словарь (B1):** модели `dictionary.Sign` (глосса, язык, описание, статус
+  `draft/review/verified/rejected`, `recorded_by`, `verified_by`, `verified_at`,
+  `comment`), `dictionary.SignClip` (FK на жест, `file`, `fps`, `duration_ms`,
+  `frames`, `version`, `size_bytes`), `dictionary.UnknownWord` (`lemma`, `lang`,
+  `count`, `last_seen_at`, статус `new/queued/recorded`),
+  `dictionary.DictionaryVersion` (`lang`, `number`, `created_at`).
+  Общие `TextChoices`: `Language` (rsl/ksl), `SignStatus`, `UnknownWordStatus`.
+  Методы: `Sign.verify(expert, comment)`, `Sign.best_clip`,
+  `DictionaryVersion.current/next_number/bump`.
+- **Фразы (B1):** модель `pipeline.Utterance` (`room`, `seq`, `text`,
+  `glosses` JSONField, `asr_ms`, `gloss_ms`, `display_lag_ms`, `degraded`,
+  `started_at`, `created_at`), метод `as_event()`. Порядковый `seq` уникален в
+  пределах комнаты.
+- **Миграции (B1):** `dictionary/0001_initial`, `pipeline/0001_initial`;
+  применяются и откатываются, `makemigrations --check` чист.
+- **Хранилище клипов (B2):** `services/clips.py` — интерфейс `ClipStorage`
+  (Protocol: `save/exists/read/open/delete/size/etag/url`) и файловая
+  реализация `FileClipStorage` поверх `MEDIA_ROOT`/`MEDIA_URL` (корень и URL
+  берутся из настроек лениво). `default_storage` — общий экземпляр.
+- **Раздача клипов (B2):** `GET /media/clips/<id>.json.gz` →
+  `dictionary.views.clip_file`; ETag по содержимому, `Cache-Control:
+  public, max-age=604800, immutable`, ответ 304 на `If-None-Match`, 404 для
+  неизвестного клипа или отсутствующего файла. В проде запрос перехватывает
+  Caddy (`Caddyfile`), в разработке и тестах файл отдаёт Django.
+- **Путь клипа (B2):** `SignClip.storage_path` (относительный путь файла) и
+  `SignClip.file_url()` (публичный URL по имени маршрута `clip-file`).
+- **Формат клипа (B3):** `services.clips` — `pack_clip` (собрать `.json.gz`),
+  `parse_clip` (прочитать и проверить), `ClipMeta` (version, gloss, fps, frames,
+  layout, data, `duration_ms`) и `ClipFormatError`. Валидация: gzip, JSON-объект,
+  версия формата, положительные `fps`/`frames`, лимит кадров, непустые
+  `layout`/`data`. Лимиты — из настроек (`CLIP_VERSION`, `CLIP_MAX_SIZE_BYTES`,
+  `CLIP_MAX_FRAMES`, `CLIP_DEFAULT_FPS`).
+- **Публичный API словаря (B3):** `GET /api/dictionary/?lang=rsl&status=verified`
+  → `{lang, version, signs}`; жесты с клипами и `url`; без авторизации отдаёт
+  только проверенные. `?status=draft` (черновики) — только редактор/эксперт/админ,
+  иначе 403. Неизвестный язык/статус — 400.
+- **Загрузка жеста (B3):** `POST /api/signs/` → `dictionary.api.create_sign_api`
+  (только редактор/эксперт/админ, иначе 401/403); принимает `multipart/form-data`
+  (`gloss`, `lang`, `description`, файл `clip`) или `application/json` (без
+  клипа). `dictionary.services.create_sign` валидирует метаданные и клип,
+  сохраняет файл в хранилище и создаёт `SignClip` (fps, кадры, длительность,
+  размер, версия). Битый/слишком большой клип — 400/413, жест не создаётся.
+- **Слаги имени файла (B3):** `dictionary.services` транслитерирует глоссу в
+  ASCII и складывает клип в `clips/<год>/<месяц>/<id>-<slug>-v<версия>.json.gz`.
+- **Переходы статусов (B4):** `dictionary/statuses.py` — чистая таблица переходов
+  (без Django): `draft → review`, `review → verified|rejected|draft`,
+  `rejected → draft|review`, `verified → review|rejected`. Функции
+  `can_transition`, `required_role`, `allowed_targets`, `validate_transition`,
+  исключение `StatusTransitionError`. У каждого перехода своя роль: редактор
+  отправляет на проверку, эксперт утверждает/отклоняет.
+- **Сервис переходов (B4):** `dictionary.services.transition_sign(sign,
+  to_status, actor, comment)` проверяет переход и роль, обновляет
+  `status`/`comment`/`verified_by`/`verified_at`; при переходе в `verified`
+  создаётся новая `DictionaryVersion` языка (`bump`). Обёртки
+  `submit_for_review` (редактор), `verify_sign`/`reject_sign` (эксперт),
+  исключения `SignValidationError` (запрещённый переход) и `SignPermissionError`
+  (нет роли). `Sign.verify()` остаётся низкоуровневым примитивом модели (админка):
+  помечает жест проверенным и тоже растит версию.
+- **Полезная нагрузка жеста (B4):** в `sign_payload` добавлены `comment` и
+  `allowed_transitions` — куда можно перевести жест дальше (для интерфейса
+  редактора и эксперта).
+- **Админка словаря (B5):** `dictionary/admin.py` — `SignAdmin` (список с
+  клипами, фильтр по статусу и языку, поиск, инлайны клипов, предпросмотр
+  лучшего клипа ссылкой на файл), `SignClipAdmin` (сквозной список клипов),
+  `UnknownWordAdmin` (очередь по убыванию частоты), `DictionaryVersionAdmin`
+  (только чтение; версии создаёт сервис).
+- **Действия в админке (B5):** «Отправить на проверку», «Утвердить (эксперт)»,
+  «Отклонить (эксперт)» — переиспользуют сервисные переходы B4
+  (`submit_for_review`/`verify_sign`/`reject_sign`); запрещённый переход
+  пропускается с предупреждением, утверждение растит версию словаря.
+- **Решение эксперта (B6):** `POST /api/signs/<id>/review/` →
+  `dictionary.api.review_sign_api`; тело `{decision: "approve"|"reject",
+  comment}` (JSON или поля формы). Менять статус может только эксперт или
+  админ (`can_review_signs`): аноним — 401, редактор/преподаватель — 403,
+  неверное решение — 400, запрещённый переход — 409, нет жеста — 404.
+  Утверждение растит версию словаря, отклонение — нет.
+- **Интерфейс эксперта (B6):** страница очереди `GET /dictionary/review/`
+  (жесты в статусе `review`) и карточка `GET/POST /dictionary/review/<id>/` с
+  клипом, метаданными, ссылкой на файл и формой «Утвердить/Отклонить» с
+  комментарием. Доступ через `dictionary.permissions.review_required` (эксперт
+  или админ), решения идут через сервисные переходы B4.
+- **Правила очереди слов (B7):** `dictionary/queue.py` — чистая таблица переходов
+  `new → queued → recorded` (и `queued → new`, `recorded → queued`), функции
+  `can_transition`/`allowed_targets`/`validate_transition`, исключение
+  `UnknownWordTransitionError`. Значения `UnknownWordStatus` совпадают с моделью.
+- **Сервис очереди (B7):** `record_unknown_word(lemma, lang)` агрегирует повторы
+  по `(lemma, lang)` (`count += 1`, `last_seen_at`); `record_unknown_words`,
+  `list_unknown_words` (сверху частые, без `recorded` по умолчанию, фильтры по
+  языку и статусу), `unknown_word_payload`, `transition_unknown_word`,
+  `queue_unknown_word` (`new`/`recorded → queued`), `mark_unknown_word_recorded`
+  (`queued → recorded`). Исключение `UnknownWordValidationError`.
+- **Интерфейс редактора (B7):** очередь `GET /dictionary/queue/` (таблица со
+  словом, счётчиком, языком, статусом, датой и кнопками «Взять в работу» /
+  «Записать жест») и действие `POST /dictionary/queue/<id>/action/`. Доступ через
+  `dictionary.permissions.dictionary_required` (редактор/эксперт/админ).
+- **Админка очереди (B7):** в `UnknownWordAdmin` действия «Взять в работу» и
+  «Пометить записанными» через сервис, запрещённый переход пропускается.
+- **Модуль аватара (C1):** `frontend/avatar.ts` — класс `Avatar`: сцена Three.js,
+  мягкий свет (ambient + key + rim + hemisphere), перспективная камера с кадром
+  «по грудь», загрузка VRM через `GLTFLoader` + `VRMLoaderPlugin`
+  (`@pixiv/three-vrm`). При загрузке модель оптимизируется
+  (`removeUnnecessaryVertices`, `combineSkeletons`, `combineMorphs`,
+  `rotateVRM0`) и ставится в нейтральную позу (`normalizedRestPose`).
+  Кадр анимации обновляет `vrm.update(delta)` и рисует сцену; `dispose()`
+  останавливает цикл, снимает слушатели и освобождает WebGL-ресурсы.
+- **Тестовая страница аватара (C1):** `GET /avatar/` → `config.views.avatar_test`,
+  шаблон `templates/static_pages/avatar.html`, точка входа
+  `frontend/avatar-page.ts`. Страница публичная: контейнер сцены, статус
+  загрузки, поле для URL модели и загрузка по кнопке. URL модели берётся из
+  поля или из настройки `AVATAR_MODEL_URL` (`.env`); без модели сцена, камера и
+  свет работают, а страница показывает подсказку.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -118,6 +229,7 @@
 | Стартовая страница | `GET /` → `config.views.home` |
 | Health | `GET /health/` → `config.views.health` |
 | HTMX-фрагмент | `GET /partials/htmx-demo/` → `config.views.htmx_demo` |
+| Тестовая страница аватара | `GET /avatar/` → `config.views.avatar_test` |
 | Вход | `GET/POST /accounts/login/` → `LoginView` + `EmailAuthenticationForm` |
 | Регистрация | `GET/POST /accounts/register/` → `accounts.views.register` |
 | Выход | `POST /accounts/logout/` → `LogoutView` |
@@ -130,16 +242,25 @@
 | WebSocket комнаты | `WS /ws/rooms/<code>/` → `rooms.consumers.RoomConsumer` |
 | Панель преподавателя | `GET /rooms/<code>/live/` → `rooms.views.room_live` |
 | История для переподключения | `GET /api/rooms/<code>/history/?after_seq=&after_message_id=` → `rooms.api.chat_history_api` |
+| Файл клипа жеста (ETag/304) | `GET /media/clips/<id>.json.gz` → `dictionary.views.clip_file` |
+| Список словаря (публичный) | `GET /api/dictionary/?lang=&status=` → `dictionary.api.dictionary_api` |
+| Создание жеста (редактор) | `POST /api/signs/` → `dictionary.api.create_sign_api` |
+| Решение эксперта (API) | `POST /api/signs/<id>/review/` → `dictionary.api.review_sign_api` |
+| Очередь на проверке | `GET /dictionary/review/` → `dictionary.views.review_queue` |
+| Карточка жеста (решение) | `GET/POST /dictionary/review/<id>/` → `dictionary.views.review_sign` |
+| Очередь нераспознанных слов | `GET /dictionary/queue/` → `dictionary.views.unknown_queue` |
+| Действие со словом очереди | `POST /dictionary/queue/<id>/action/` → `dictionary.views.unknown_word_action` |
 | Закрыть комнату | `POST /rooms/<code>/close/` → `rooms.views.room_close` |
 | Сменить ID комнаты | `POST /rooms/<code>/rotate-code/` → `rooms.views.room_rotate_code` |
 | Удалить участника | `POST /rooms/<code>/participants/<id>/remove/` → `rooms.views.room_remove_participant` |
 | Управление комнатой (сервис) | `rooms.management` (close_room, rotate_join_code, remove_participant) |
-| Админка | `GET /admin/` |
+| Админка | `GET /admin/` (в т.ч. `/admin/dictionary/sign/`, `/admin/dictionary/signclip/`, `/admin/dictionary/unknownword/`, `/admin/dictionary/dictionaryversion/`) |
 | WebSocket-эхо (только A2, DEBUG) | `WS /ws/echo/<group>/` → `config.consumers.EchoConsumer` |
 | ASGI-приложение | `config.asgi:application` |
 | WSGI-приложение | `config.wsgi:application` |
 | JS-точка входа | `frontend/main.ts` → `{% vite_asset 'frontend/main.ts' %}` |
 | JS страницы комнаты | `frontend/rooms.ts` → крупный режим и копирование ссылки |
+| JS аватара (C1) | `frontend/avatar.ts` (класс `Avatar`), `frontend/avatar-page.ts` (страница) |
 
 ## Клиент: режимы
 
@@ -153,7 +274,11 @@
 ## Тесты
 
 - `tests/test_smoke.py` — стартовая страница, health, HTMX-фрагмент.
-- `tests/test_frontend.py` — манифест Vite и URL собранного ассета.
+- `tests/test_frontend.py` — манифест Vite и URL собранного ассета, точка входа
+  тестовой страницы аватара (`frontend/avatar-page.ts`).
+- `tests/test_avatar_page.py` — страница `GET /avatar/`: рендер без входа,
+  контейнер сцены и атрибуты модуля, передача `AVATAR_MODEL_URL` в шаблон и
+  подсказка при пустой модели.
 - `tests/test_websocket.py` — два клиента одной группы получают сообщение,
   изоляция групп, отказ без разрешённого Origin, отключение echo вне DEBUG.
 - `accounts/tests/` — модель и роли, регистрация/вход/выход, доступ к админке,
@@ -167,6 +292,53 @@
   комнат, 4401/4403, presence, ping/pong, чат, история, rate limit,
   `room_closed`/`participant_removed`, heartbeat: ping продлевает окно,
   молчащий клиент закрывается кодом 4408).
+- `dictionary/tests/test_models.py` — значения по умолчанию, уникальность
+  `Sign(gloss, lang)` только среди проверенных, дубли черновиков, жест в другом
+  языке, `verify`, `best_clip` (версия и кадры), ограничения и порядок
+  `UnknownWord`, версии словаря (`next_number`, `bump`, `current`).
+- `pipeline/tests/test_models.py` — значения по умолчанию `Utterance`,
+  уникальность `(room, seq)`, один `seq` в разных комнатах, порядок, `as_event`.
+- `services/tests/test_clips.py` — `FileClipStorage`: сохранение/чтение,
+  создание каталогов, `exists`, `open`, `size`, `delete`, стабильность и
+  чувствительность ETag, сборка URL.
+- `dictionary/tests/test_clip_view.py` — раздача клипа: тело ответа,
+  `Cache-Control`/`ETag`, **304 на повторный запрос**, разные ETag у разных
+  клипов, 404 для неизвестного клипа и отсутствующего файла.
+- `services/tests/test_clip_format.py` — `pack_clip`/`parse_clip`: roundtrip,
+  gzip/JSON, версия, `fps`/`frames`, лимит кадров, `layout`/`data`,
+  `duration_ms`.
+- `dictionary/tests/test_statuses.py` — чистые правила переходов: разрешённые и
+  запрещённые пары, требуемые роли, `allowed_targets`, совпадение значений
+  `StrEnum` и `TextChoices`.
+- `dictionary/tests/test_transitions.py` — сервис: отправка на ревью, утверждение
+  и отклонение, рост версии словаря при `verified` (по языку), повторная подача
+  отклонённого, переоткрытие проверенного, запрет роли (редактор не утверждает,
+  преподаватель не подаёт), запрещённые переходы не меняют статус и не создают
+  версию, `Sign.verify()` растит версию.
+- `dictionary/tests/test_queue_rules.py` — чистые правила очереди: разрешённые и
+  запрещённые переходы, `allowed_targets`, совпадение `StrEnum` и `TextChoices`.
+- `dictionary/tests/test_queue.py` — агрегация повторов (критерий B7: одна запись,
+  растущий счётчик, `last_seen_at`, отдельные языки, нормализация леммы),
+  порядок списка по частоте, фильтры, переходы статусов, интерфейс редактора
+  (доступ, список, пустая очередь, действие «взять в работу»/«записать»).
+- `dictionary/tests/test_review.py` — интерфейс эксперта: доступ к очереди и
+  карточке (вход, роль), список только `review`-жестов, пустая очередь, ссылка
+  на клип и предупреждение без клипа, решения через форму (утверждение с ростом
+  версии, отклонение, отсутствие решения, запрещённый переход).
+- `dictionary/tests/test_admin.py` — регистрация моделей словаря в админке,
+  список и фильтр по статусу, поиск, порядок очереди нераспознанных слов,
+  ссылка на файл клипа на странице жеста и «клипа пока нет», сквозной список
+  клипов, действия переходов (отправка, утверждение с ростом версии, отклонение,
+  пропуск запрещённого перехода), доступность админки только персоналу,
+  версии словаря только на чтение, действия очереди слов.
+- `dictionary/tests/test_api.py` — права доступа (аноним, преподаватель,
+  редактор, эксперт, админ) к списку и созданию жеста; фильтр по языку, версия
+  словаря, черновики только для ролей словаря; URL клипа в списке; создание
+  жеста из формы и JSON, загрузка клипа, отклонение пустой глоссы, неверного
+  языка, битого (400) и слишком большого (413) клипа; решение эксперта
+  (`/review/`): права (аноним 401, редактор/преподаватель 403), утверждение и
+  отклонение, JSON и форма, неверное решение (400), запрещённый переход (409),
+  неизвестный жест (404), версия словаря.
 - `rooms/tests/test_management.py` — сервисные функции и HTTP-действия A10:
   смена ID (включая повтор при коллизии и недействительность старого кода),
   закрытие (идемпотентность, очистка presence), удаление участника (presence,
@@ -240,23 +412,138 @@
   или имя преподавателя) и `is_teacher`, чтобы история читалась без join к User.
 - История отдаётся по возрастанию id: при подключении — последние 50, через
   `?after_message_id` — только новые; клиент отсекает дубликаты по id.
+- `Utterance` живёт в `pipeline`, остальные модели B1 — в `dictionary`
+  (по `docs/spec/project-structure.md`); `pipeline.Utterance` ссылается на
+  `rooms.Room` через FK, поэтому миграция зависит от `rooms`.
+- Уникальность `Sign(gloss, lang)` — частичная (`UniqueConstraint` с условием
+  `status="verified"`): черновики и отклонённые дубликаты допустимы, а проверенный
+  жест один на глоссу и язык. Так снимается расхождение при повторном ревью.
+- `UnknownWord` уникален по `(lemma, lang)` (`count` и `last_seen_at`
+  агрегируются), отсортирован по `-count`; отсюда же индекс `(lang, -count)`.
+- `DictionaryVersion.number` уникален в пределах языка; номер растёт через
+  `bump(lang)` (`next_number = max + 1`), текущая версия — `current(lang)`
+  (наибольший номер). Глоссы для промпта берутся из текущей версии.
+- Формат файла клипа и поля `SignClip` подготовлены под `docs/spec/clip-format.md`
+  (`.json.gz`, fps 30, число кадров, версия, размер); фактическая загрузка — B3.
+- Хранилище клипов вынесено в `services.clips` за Protocol, а не в Django
+  `STORAGES`: код словаря не знает, где лежат файлы (файловая система сейчас,
+  S3 позже), а `SignClip.file` остаётся обычным `FileField` для админки.
+- `FileClipStorage.root` и `base_url` читаются из настроек **лениво** (property):
+  так `override_settings(MEDIA_ROOT=...)` в тестах действует и на уже созданный
+  `default_storage`.
+- ETag считается по содержимому файла (md5), а не по mtime: клип неизменяем,
+  поэтому повторный запрос стабильно получает 304. Заголовки Django и Caddy
+  совпадают (`Cache-Control: public, max-age=604800, immutable`).
+- ETag-функция вью не падает на отсутствующем файле (возвращает `None`), а сам
+  вью отдаёт 404 — иначе `@condition` превращал бы 404 в 500.
+- Клипы сжимаются на диск (`.json.gz`) и отдаются как `application/gzip`:
+  декодирование gzip — на клиенте (этап C2), Django/Caddy содержимое не трогают.
+- Публичный `GET /api/dictionary/` отдаёт только **проверенные** жесты: черновики
+  запрашиваются со `status=draft` и доступны лишь редактору/эксперту/админу
+  (`dictionary.permissions.can_manage_dictionary`). Проверка идёт на сервере, а
+  не скрытием в интерфейсе (ТЗ 7.3).
+- Создание жеста (`POST /api/signs/`) — для ролей словаря; преподаватель и аноним
+  получают 403/401, и ни одного `Sign` при этом не создаётся (проверено тестами).
+- Клип проверяется на сервере до записи на диск (`parse_clip`): битый файл не
+  создаёт ни `Sign`, ни `SignClip` — валидация и создание идут в одной транзакции.
+- Лимит размера файла (`CLIP_MAX_SIZE_BYTES`) проверяется по `upload.size` до
+  чтения в память; превышение — 413. Лимит кадров (`CLIP_MAX_FRAMES`) — в
+  `parse_clip`, превышение — 400.
+- Имя файла клипа — `<id>-<транслит глоссы>-v<версия>.json.gz`: читаемо в
+  хранилище и в `pg_dump`-бэкапах, при этом id гарантирует уникальность.
+- Валидация метаданных и формата вынесена в `dictionary.services` /
+  `services.clips`; вью `dictionary.api` только разбирает ввод и отдаёт
+  JSON-ответы (views тонкие, логика — в сервисах).
+- Правила переходов статусов живут в `dictionary/statuses.py` без зависимостей
+  от Django — это чистые функции, их удобно тестировать и переиспользовать в
+  админке (B5), API эксперта (B6) и интерфейсе. Значения `SignStatus` (StrEnum)
+  совпадают с `TextChoices` модели, соответствие проверяется тестом.
+- Версию словаря растит **только** переход в `verified` (по языку жеста), а не
+  создание жеста: глоссы для промпта берутся из текущей версии (ТЗ 9).
+- Роли переходов: отправка на проверку — редактор (и эксперт-носитель, и админ),
+  утверждение/отклонение — только эксперт и админ. Преподаватель не может менять
+  статусы. Проверка роли идёт в сервисе, а не в интерфейсе.
+- `Sign.verify()` оставлен низкоуровневым примитивом модели (нужен админке и
+  служебным сценариям): он помечает жест проверенным без проверки перехода, но
+  тоже растит версию. Поток редактора/эксперта идёт через
+  `transition_sign`/`verify_sign`, где переход валидируется.
+- Админка словаря не дублирует правила статусов: действия вызывают сервисные
+  переходы B4 и на запрещённом переходе показывают предупреждение, а не падают.
+  Так админка, API эксперта (B6) и интерфейс редактора работают по одним правилам.
+- Предпросмотр клипа в админке — ссылка на файл (`clip-file`) с метаданными
+  (кадры, fps, длительность, размер). Полноценное проигрывание анимации — в
+  браузере (этап C), в админке достаточно открыть файл для ручной проверки.
+- `DictionaryVersion` в админке только для чтения: версии создаёт сервис при
+  утверждении жеста, ручное добавление версий запрещено (`has_add_permission`).
+- Преподаватель в админку по-прежнему не попадает (`is_staff` только у
+  администраторов); редактор и эксперт работают со словарём через API (B3/B6),
+  а не через `/admin/`.
+- Решение эксперта живёт в двух местах с одной логикой: JSON
+  `POST /api/signs/<id>/review/` (для PWA) и серверная страница
+  `/dictionary/review/<id>/` (для ручной проверки). Обе вызывают сервисные
+  переходы B4, поэтому правила статусов не дублируются.
+- Коды ответа решения: 401 без входа, 403 не-эксперт, 400 неверное `decision` или
+  битый JSON, 404 нет жеста, 409 запрещённый переход (например, утвердить
+  черновик), 200 — успех. Так клиент PWA отличает «нет прав» от «не та фаза».
+- Права эксперта — через `can_review_signs` (`dictionary/permissions.py`) и
+  декоратор `review_required`; редактор и преподаватель интерфейс эксперта не
+  получают (403), хотя редактор и создаёт жесты (B3).
+- Интерфейс эксперта показывает клип ссылкой на файл с метаданными: полноценное
+  проигрывание анимации (аватар, ретаргет) — этап C, в B6 для решения достаточно
+  открыть файл клипа. Оригинальное видео не хранится (аудио и видео не храним).
+- Повторы нераспознанных слов агрегируются в одной строке по `(lemma, lang)`
+  через `get_or_create` + инкремент `count` (а не по строке на каждое вхождение):
+  список для редактора сразу показывает приоритет, а не сотни дублей.
+- Записанное слово (`recorded`) при повторе снова не всплывает в очереди
+  (`list_unknown_words` исключает `recorded`): счётчик растёт, но редактор уже
+  записал жест. Вернуть слово можно переоткрытием (`recorded → queued`).
+- Очередь слов — отдельный модуль `dictionary/queue.py` с чистыми правилами, по
+  образцу `dictionary/statuses.py` (B4): одна точка правды для статусов, проверки
+  и интерфейсов (страница редактора, API, админка).
+- Интерфейс очереди для редактора (`/dictionary/queue/`) и действия идут через
+  сервис: интерфейс не меняет `status` и `count` напрямую.
+- Пополнение очереди (`record_unknown_word`) — публичная функция словаря: её
+  вызовет конвейер глосс в блоке E для слов без жеста (FR-9). Модель `UnknownWord`
+  при этом живёт в `dictionary`, а `pipeline` зависит от неё только через сервис.
+- Модуль аватара (C1) — класс `Avatar` в `frontend/avatar.ts`, а не набор
+  функций: у сцены есть жизненный цикл (создание → загрузка → отрисовка →
+  `dispose`), и C3/C4 будут обращаться к модели через `avatar.model`. Логика
+  отрисовки — в модуле, страница (`frontend/avatar-page.ts`) только связывает DOM
+  и `Avatar`.
+- VRM-модель не входит в репозиторий: её выбирает и кладёт человек (ТЗ 15.3,
+  лицензия проверяется). URL берётся из настройки `AVATAR_MODEL_URL` или поля на
+  странице, поэтому на C1 без модели страница всё равно рисует сцену, свет и
+  камеру, а не падает.
+- При загрузке VRM вызываются оптимизации three-vrm
+  (`removeUnnecessaryVertices`, `combineSkeletons`, `combineMorphs`): это снижает
+  нагрузку на скелет и морф-цели, что важно для 30 FPS на смартфоне (НФТ) —
+  цель блока C. `rotateVRM0` ставит модель VRM 0.x лицом к камере (для 1.0 —
+  no-op), ручной поворот не нужен.
+- Нейтральная поза — `humanoid.normalizedRestPose` самой модели (ТЗ 5.4:
+  нейтральная поза в начале и конце клипа). Поза клипов будет накладываться поверх
+  неё на C3/C4.
 
-## Проверка A11
+## Проверка C1
 
 ```bash
-make check          # ruff + tsc + vite build + 140 тестов — зелёный
+make check          # ruff + tsc + vite build + 341 тест — зелёный
 ```
 
-Критерий этапа (в объёме блока A): клиент шлёт `ping` раз в 20 с, и пока он это
-делает, соединение живёт; клиент, замолчавший дольше 60 с, получает закрытие
-4408. Клиент переподключается с паузой 1, 2, 4, 8…15 с, после подключения
-догружает пропущенные сообщения через `GET /api/rooms/<code>/history/` и
-отсекает дубликаты по `id`. Фразовая часть (`after_seq`, `utterances`) уже в
-контракте, но наполняется в блоке E — сейчас всегда пустой список.
+Критерий этапа («модуль рендерится на тестовой странице»): `GET /avatar/`
+возвращает 200 без входа, отдаёт контейнер сцены (`data-avatar-stage`), статус и
+точку входа `frontend/avatar-page.ts`; `AVATAR_MODEL_URL` доходит до шаблона, а
+при пустом значении страница подсказывает задать модель. Сборка Vite включает
+`frontend/avatar-page.ts` как отдельный entry. Ручная проверка: открыть `/avatar/`,
+убедиться, что сцена (свет, камера) отрисована, и загрузить VRM — аватар в
+нейтральной позе.
 
 ## Дальше
 
-**Блок A закрыт.** Следующий — **B1**: модели `Sign`, `SignClip`, `UnknownWord`,
-`DictionaryVersion`, `Utterance` и миграции. Именно `Utterance` с полем `seq`
-наполнит `after_seq` в истории (A11) и события `asr_text`/`utterance` (блок E).
-Читать: `docs/spec/db-schema.md`, `docs/spec/dictionary-process.md`.
+**C1 готов.** Следующий — **C2**: декодер формата клипа (base64, gzip, Float16
+в массивы), тесты `vitest` на фикстуре. Дальше C3 (ретаргет landmarks через
+Kalidokit + One Euro) и C4 (очередь и блендинг). Читать:
+`docs/spec/clip-format.md`, `docs/spec/requirements.md` (3.3).
+
+Пополнение очереди из реальных занятий подключается в блоке **E**
+(`record_unknown_word` вызывается для слов без жеста), а запись жеста из очереди —
+в блоке **D** (`D4`: слово получает статус `recorded`).

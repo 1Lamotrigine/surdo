@@ -2,6 +2,7 @@
 
 import logging
 
+from django.conf import settings
 from django.db import connection
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import redirect, render
@@ -25,6 +26,17 @@ def home(request: HttpRequest):
 def htmx_demo(request: HttpRequest):
     """Небольшой фрагмент для проверки HTMX без перезагрузки страницы."""
     return render(request, "partials/htmx_demo.html")
+
+
+def avatar_test(request: HttpRequest):
+    """Тестовая страница аватара (C1): сцена, камера, свет и загрузка VRM."""
+    return render(
+        request,
+        "static_pages/avatar.html",
+        {
+            "model_url": settings.AVATAR_MODEL_URL,
+        },
+    )
 
 
 def health(request: HttpRequest) -> JsonResponse:

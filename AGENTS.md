@@ -17,6 +17,7 @@
 | Caddy | 2 |
 | Node.js | 22 LTS |
 | Vite / TypeScript | 8.3.5 / 7.0.2 |
+| three / @pixiv/three-vrm / @types/three | 0.186.1 / 3.5.5 / 0.186.0 |
 | django-vite | 3.2.0 |
 | htmx | 2.0.11 |
 | segno (QR, SVG) | 1.6.6 |

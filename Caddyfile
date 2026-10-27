@@ -3,6 +3,11 @@
 
 	handle /media/* {
 		root * /srv
+		header {
+			# Клипы неизменяемы (новая версия — новый файл); ETag/304 делает file_server.
+			Cache-Control "public, max-age=604800, immutable"
+			X-Content-Type-Options "nosniff"
+		}
 		file_server
 	}
 

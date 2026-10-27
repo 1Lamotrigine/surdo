@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sign.gloss }} · проверка жеста{% endblock %}
+
+{% block content %}
+  <section class="review-page">
+    <p class="eyebrow">Проверка жеста</p>
+    <h1>{{ sign.gloss }}</h1>
+    <p class="review-meta">
+      <span class="badge">{{ sign.get_lang_display }}</span>
+      <span class="badge">{{ sign.get_status_display }}</span>
+      {% if sign.recorded_by %}
+        <span>Записал: {{ sign.recorded_by.name|default:sign.recorded_by.email }}</span>
+      {% endif %}
+    </p>
+
+    {% if sign.description %}
+      <p class="lead">{{ sign.description }}</p>
+    {% endif %}
+
+    <div class="review-clip">
+      <h2>Клип</h2>
+      {% if best_clip %}
+        <p class="review-meta">
+          Кадров: {{ best_clip.frames }} ·
+          {{ best_clip.fps }} fps ·
+          {{ best_clip.duration_ms }} мс ·
+          версия {{ best_clip.version }} ·
+          {{ best_clip.size_bytes|filesizeformat }}
+        </p>
+        <p>
+          <a class="button button-secondary"
+             href="{{ best_clip.file_url }}" target="_blank" rel="noopener">
+            Открыть файл клипа
+          </a>
+        </p>
+        <p class="review-hint">
+          Полное проигрывание на аватаре появится позже; для решения достаточно
+          открыть файл клипа с landmarks.
+        </p>
+      {% else %}
+        <aside class="notice notice-warning">
+          У жеста нет клипа. Запросите клип у редактора перед проверкой.
+        </aside>
+      {% endif %}
+    </div>
+
+    <form class="review-form" method="post" novalidate>
+      {% csrf_token %}
+      <div class="field">
+        <label for="review-comment">Комментарий для редактора</label>
+        <input id="review-comment" type="text" name="comment" maxlength="500"
+               value="{{ sign.comment }}" autocomplete="off"
+               placeholder="Что исправить или почему утверждаете">
+      </div>
+      <div class="review-actions">
+        <button class="button" type="submit" name="decision" value="approve">
+          Утвердить
+        </button>
+        <button class="button button-danger" type="submit" name="decision" value="reject"
+                data-confirm="Отклонить жест? Редактор увидит комментарий.">
+          Отклонить
+        </button>
+        <a class="button button-secondary" href="{% url 'dictionary:review-queue' %}">
+          Назад к очереди
+        </a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

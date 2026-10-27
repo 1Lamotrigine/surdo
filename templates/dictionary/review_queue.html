@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Проверка жестов · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="review-page">
+    <p class="eyebrow">Эксперт-носитель</p>
+    <h1>Жесты на проверке</h1>
+    <p class="lead">
+      Посмотрите клип, оцените смысл, скорость, положение и мимику. Утверждение
+      растёт в версию словаря и открывает жест студентам; отклонение возвращает
+      его редактору с вашим комментарием.
+    </p>
+
+    {% if signs %}
+      <ul class="review-list">
+        {% for sign in signs %}
+          <li class="review-item">
+            <div class="review-item-main">
+              <p class="review-gloss">{{ sign.gloss }}</p>
+              <p class="review-meta">
+                <span class="badge">{{ sign.get_lang_display }}</span>
+                {% if sign.recorded_by %}
+                  <span>Записал: {{ sign.recorded_by.name|default:sign.recorded_by.email }}</span>
+                {% endif %}
+                <span>{{ sign.created_at|date:"d.m.Y H:i" }}</span>
+              </p>
+              {% if sign.description %}<p class="review-desc">{{ sign.description }}</p>{% endif %}
+            </div>
+            <a class="button" href="{% url 'dictionary:review-sign' sign_id=sign.pk %}">
+              Проверить
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <aside class="notice">Жестов на проверке нет. Заходите позже.</aside>
+    {% endif %}
+  </section>
+{% endblock %}

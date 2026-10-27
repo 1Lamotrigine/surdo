@@ -1,1 +1,160 @@
-"""HTTP-представления приложения dictionary."""
+"""HTTP-представления приложения dictionary: клипы и интерфейс эксперта."""
+
+from __future__ import annotations
+
+from django.contrib import messages
+from django.http import FileResponse, Http404, HttpRequest
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import condition, require_http_methods
+
+from dictionary.models import Language, Sign, SignClip, SignStatus, UnknownWord
+from dictionary.permissions import dictionary_required, review_required
+from dictionary.services import (
+    SignPermissionError,
+    SignValidationError,
+    UnknownWordValidationError,
+    list_unknown_words,
+    mark_unknown_word_recorded,
+    queue_unknown_word,
+    reject_sign,
+    verify_sign,
+)
+from services.clips import default_storage
+
+# Клипы неизменяемы (новая версия — новый файл), поэтому кэш надолго.
+CLIP_CACHE_CONTROL = "public, max-age=604800, immutable"
+CLIP_CONTENT_TYPE = "application/gzip"
+
+
+def _get_clip(clip_id: int) -> SignClip | None:
+    return SignClip.objects.filter(pk=clip_id).first()
+
+
+def _clip_etag(request: HttpRequest, clip_id: int) -> str | None:
+    clip = _get_clip(clip_id)
+    if clip is None or not clip.file:
+        return None
+    try:
+        return default_storage.etag(clip.file.name)
+    except FileNotFoundError:
+        # Вью ниже отдаст 404: ETag для отсутствующего файла не считаем.
+        return None
+
+
+@condition(etag_func=_clip_etag)
+def clip_file(request: HttpRequest, clip_id: int) -> FileResponse:
+    """Отдать файл клипа с ETag и кэш-заголовками (повтор — 304).
+
+    В проде запросы к ``/media/clips/<id>.json.gz`` перехватывает Caddy; эта вью
+    используется, когда клипы отдаёт Django (DEBUG, тесты).
+    """
+    clip = _get_clip(clip_id)
+    if clip is None or not clip.file:
+        raise Http404("Клип не найден")
+
+    try:
+        file = default_storage.open(clip.file.name)
+    except FileNotFoundError as exc:
+        raise Http404("Файл клипа отсутствует") from exc
+
+    response = FileResponse(file, content_type=CLIP_CONTENT_TYPE)
+    response["Cache-Control"] = CLIP_CACHE_CONTROL
+    return response
+
+
+@review_required
+def review_queue(request: HttpRequest):
+    """Очередь жестов на проверке (интерфейс эксперта, FR-20).
+
+    Показываем жесты в статусе ``review``: эксперт открывает карточку, смотрит
+    клип и утверждает или отклоняет с комментарием.
+    """
+    signs = (
+        Sign.objects.filter(status=SignStatus.REVIEW)
+        .select_related("recorded_by")
+        .order_by("created_at")
+    )
+    return render(request, "dictionary/review_queue.html", {"signs": signs})
+
+
+@require_http_methods(["GET", "POST"])
+@review_required
+def review_sign(request: HttpRequest, sign_id: int):
+    """Карточка жеста: эксперт смотрит клип и принимает решение (FR-20).
+
+    GET показывает клип и форму решения, POST применяет решение через сервисные
+    переходы B4 (утверждение растит версию словаря).
+    """
+    sign = get_object_or_404(
+        Sign.objects.select_related("recorded_by", "verified_by"), pk=sign_id
+    )
+
+    if request.method == "POST":
+        decision = request.POST.get("decision")
+        comment = request.POST.get("comment", "")
+        if decision == "approve":
+            action, verb = verify_sign, "утверждён"
+        elif decision == "reject":
+            action, verb = reject_sign, "отклонён"
+        else:
+            messages.error(request, "Выберите решение: утвердить или отклонить.")
+            return redirect("dictionary:review-sign", sign_id=sign.pk)
+
+        try:
+            action(sign, actor=request.user, comment=comment)
+        except SignPermissionError as exc:
+            messages.error(request, str(exc))
+        except SignValidationError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, f"Жест «{sign.gloss}» {verb}.")
+        return redirect("dictionary:review-queue")
+
+    return render(
+        request,
+        "dictionary/review_sign.html",
+        {
+            "sign": sign,
+            "best_clip": sign.best_clip,
+        },
+    )
+
+
+@dictionary_required
+def unknown_queue(request: HttpRequest):
+    """Очередь нераспознанных слов для редактора (FR-21).
+
+    Сверху самое частое слово: сколько раз встретилось и кнопка «Записать жест».
+    """
+    lang = request.GET.get("lang") or None
+    if lang and lang not in Language.values:
+        lang = None
+    words = list_unknown_words(lang=lang)
+    return render(
+        request,
+        "dictionary/unknown_queue.html",
+        {"words": words, "lang": lang, "languages": Language.choices},
+    )
+
+
+@require_http_methods(["POST"])
+@dictionary_required
+def unknown_word_action(request: HttpRequest, word_id: int):
+    """Взять слово в работу или пометить записанным (FR-21)."""
+    word = get_object_or_404(UnknownWord, pk=word_id)
+    action = request.POST.get("action")
+    if action == "queue":
+        transition, verb = queue_unknown_word, "взято в работу"
+    elif action == "recorded":
+        transition, verb = mark_unknown_word_recorded, "помечено записанным"
+    else:
+        messages.error(request, "Неизвестное действие со словом очереди.")
+        return redirect("dictionary:unknown-queue")
+
+    try:
+        transition(word)
+    except UnknownWordValidationError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"Слово «{word.lemma}» {verb}.")
+    return redirect("dictionary:unknown-queue")

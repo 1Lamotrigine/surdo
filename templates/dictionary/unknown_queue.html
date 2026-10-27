@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Очередь нераспознанных слов · ИИ-аватар сурдопереводчик{% endblock %}
+
+{% block content %}
+  <section class="review-page">
+    <p class="eyebrow">Редактор словаря</p>
+    <h1>Очередь нераспознанных слов</h1>
+    <p class="lead">
+      Слова из реальных занятий, для которых ещё нет жеста. Сверху самое частое —
+      начните с него: возьмите в работу, а после записи клипа пометьте записанным.
+    </p>
+
+    <form class="queue-filter" method="get">
+      <label for="queue-lang">Язык:</label>
+      <select id="queue-lang" name="lang" onchange="this.form.submit()">
+        <option value="">Все языки</option>
+        {% for value, label in languages %}
+          <option value="{{ value }}" {% if value == lang %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <noscript><button class="button button-secondary" type="submit">Показать</button></noscript>
+    </form>
+
+    {% if words %}
+      <table class="queue-table">
+        <thead>
+          <tr>
+            <th scope="col">Слово</th>
+            <th scope="col">Повторов</th>
+            <th scope="col">Язык</th>
+            <th scope="col">Статус</th>
+            <th scope="col">Последний раз</th>
+            <th scope="col">Действие</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for word in words %}
+            <tr>
+              <td class="queue-lemma">{{ word.lemma }}</td>
+              <td><span class="badge">{{ word.count }}</span></td>
+              <td>{{ word.get_lang_display }}</td>
+              <td>{{ word.get_status_display }}</td>
+              <td>{{ word.last_seen_at|date:"d.m.Y H:i" }}</td>
+              <td>
+                {% if word.status == "queued" %}
+                  <form method="post" action="{% url 'dictionary:unknown-word-action' word_id=word.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="recorded">
+                    <button class="button" type="submit">Записать жест</button>
+                  </form>
+                {% elif word.status == "new" %}
+                  <form method="post" action="{% url 'dictionary:unknown-word-action' word_id=word.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="queue">
+                    <button class="button button-secondary" type="submit">Взять в работу</button>
+                  </form>
+                {% else %}
+                  <span class="queue-done">Записано</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <aside class="notice">Нераспознанных слов нет. Очередь пуста.</aside>
+    {% endif %}
+  </section>
+{% endblock %}
