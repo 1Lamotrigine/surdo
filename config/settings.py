@@ -124,6 +124,17 @@ ROOM_PING_TIMEOUT = int(os.environ.get("ROOM_PING_TIMEOUT", "60"))
 ASR_MAX_CONCURRENCY = max(1, int(os.environ.get("ASR_MAX_CONCURRENCY", os.cpu_count() or 1)))
 ROOM_QUEUE_MAX = max(1, int(os.environ.get("ROOM_QUEUE_MAX", "5")))
 
+# LLM-глоссы (F1/F4): провайдер, модель и ключ. Пустые значения означают, что
+# LLM не настроена: конвейер перейдёт в упрощённый режим F2. Таймаут — жёсткий
+# предел ожидания глосс; при его превышении фраза показывается только
+# субтитрами (ТЗ 5.7). `LLM_API_URL` необязателен: по умолчанию берётся
+# OpenAI-compatible endpoint или локальная Ollama.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "").strip()
+LLM_MODEL = os.environ.get("LLM_MODEL", "").strip()
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
+LLM_API_URL = os.environ.get("LLM_API_URL", "").strip()
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT") or "8")
+
 # Загрузка клипа жеста (формат — docs/spec/clip-format.md). Ограничения
 # защищают хранилище от битых и слишком больших файлов.
 CLIP_VERSION = int(os.environ.get("CLIP_VERSION", "1"))

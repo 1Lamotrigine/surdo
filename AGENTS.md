@@ -127,9 +127,21 @@ app/
   `pipeline/queue.py:PipelineQueue`: один `asyncio.Queue` и воркер на комнату,
   глобальный семафор `ASR_MAX_CONCURRENCY`, лимит `ROOM_QUEUE_MAX` со сбросом
   самого старого ожидающего задания. Цикл очереди — в отдельном daemon-потоке
-  (Django-вью синхронное), обработка — `asyncio.to_thread(create_utterance)`.
+  (Django-вью синхронное). Обработчик может быть sync (уходит в
+  `asyncio.to_thread`) или async (F4: `process_text_job_async`).
   Ошибка одного задания не убивает воркер; `Future` нужен тестам, HTTP его не
   ждёт. Очереди в памяти → один процесс uvicorn.
+- LLM-глоссы в конвейере (F4): `pipeline/gloss_engine.py` собирает словарь из
+  проверенных жестов и `DictionaryVersion.current`, вызывает `to_glosses`.
+  В async-пути `compute_glosses_async` читает словарь через
+  `database_sync_to_async`, а блокирующий провайдер — через
+  `asyncio.to_thread` под `asyncio.wait_for(..., LLM_TIMEOUT)`. Нет
+  `LLM_MODEL`/ключа → F2-резерв и `degraded=True`; ошибка/битый ответ/таймаут
+  настроенной LLM → пустые `tokens` и `degraded=True` (только субтитры).
+  Провайдер `services/llm.py` — stdlib `urlopen`, OpenAI-compatible API или
+  Ollama, `LLM_API_URL`/`LLM_TIMEOUT` в настройках. `create_utterance` без
+  `glosses` остаётся путём E1; F4 передаёт готовые глоссы, `gloss_ms` и
+  `degraded`. Очередь по умолчанию использует `process_text_job_async`.
 - Живые фразы (E3): `pipeline/events.py` рассылает в группу `room_<id>`
   `asr_text` (сразу распознанный текст) и `utterance` (глоссы E1 + клипы
   проверенных жестов/чисел/дактиля в порядке показа). Фоновый поток очереди

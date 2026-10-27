@@ -21,16 +21,25 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import inspect
 import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from channels.db import database_sync_to_async
 from django.conf import settings
+from django.db import connections
+from django.utils import timezone
 
 from pipeline.events import broadcast_asr_text, broadcast_utterance
+from pipeline.gloss_engine import compute_glosses_async
 from pipeline.models import Utterance
-from pipeline.services import create_utterance
+from pipeline.services import (
+    create_utterance,
+    normalize_text,
+    sign_language_for_utterance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,26 +65,61 @@ class TextJob:
     )
 
 
-def process_text_job(job: TextJob) -> Utterance:
-    """Обработать фразу в фоновом потоке: сохранить ``Utterance`` и глоссы.
-
-    E3: сначала в комнату уходит распознанный текст (``asr_text``), затем —
-    сохранённая фраза с глоссами и ссылками на клипы (``utterance``). Рассылка
-    идёт до/после обработки, поэтому текст виден раньше глосс и аватара.
-    """
+def _prepare_job(job: TextJob):
+    """Синхронная часть перед LLM: комната, текст, язык и время старта."""
     from rooms.models import Room
 
-    broadcast_asr_text(job.room_id, job.text)
     room = Room.objects.get(pk=job.room_id)
-    utterance = create_utterance(
+    return (
         room,
-        job.text,
-        lang=job.lang,
-        asr_ms=job.asr_ms,
-        started_at=job.started_at,
+        normalize_text(job.text),
+        sign_language_for_utterance(room, job.lang),
+        job.started_at or timezone.now(),
     )
-    broadcast_utterance(utterance)
-    return utterance
+
+
+async def process_text_job_async(job: TextJob) -> Utterance:
+    """Обработать фразу без блокировки цикла очереди (F4).
+
+    E3: сначала в комнату уходит распознанный текст (``asr_text``), затем —
+    сохранённая фраза с глоссами и ссылками на клипы (``utterance``). Глоссы
+    получает ``pipeline.gloss_engine``: LLM вызывается в ``asyncio.to_thread``
+    с таймаутом ``LLM_TIMEOUT``. Если LLM настроена и упала/зависла, сохраняем
+    только субтитры с ``degraded=True``; если не настроена — работает F2.
+    """
+    broadcast_asr_text(job.room_id, job.text)
+    try:
+        room, clean_text, sign_lang, started_at = await database_sync_to_async(
+            _prepare_job
+        )(job)
+        outcome = await compute_glosses_async(clean_text, sign_lang)
+        utterance = await database_sync_to_async(create_utterance)(
+            room,
+            clean_text,
+            lang=sign_lang,
+            asr_ms=job.asr_ms,
+            started_at=started_at,
+            glosses=outcome.glosses,
+            gloss_ms=outcome.elapsed_ms,
+            degraded=outcome.degraded,
+        )
+        # Сборка клипов и рассылка обращаются к БД, поэтому тоже уходят из loop.
+        await database_sync_to_async(broadcast_utterance)(utterance)
+        return utterance
+    finally:
+        # Цикл очереди живёт всё время работы процесса; не держим соединение
+        # фонового потока открытым между редкими фразами.
+        await database_sync_to_async(connections.close_all)()
+
+
+def process_text_job(job: TextJob) -> Utterance:
+    """Синхронная обёртка F4 для прямых вызовов и старых обработчиков.
+
+    Очередь по умолчанию использует :func:`process_text_job_async`, чтобы
+    таймаут LLM не ждал завершения зависшего потока. Эта обёртка нужна тестам и
+    коду, который исторически вызывает обработчик из своего потока.
+    """
+    return asyncio.run(process_text_job_async(job))
 
 
 class PipelineQueue:
@@ -84,7 +128,7 @@ class PipelineQueue:
     def __init__(
         self,
         *,
-        processor=process_text_job,
+        processor=process_text_job_async,
         max_concurrency: int | None = None,
         room_queue_max: int | None = None,
     ) -> None:
@@ -202,7 +246,14 @@ class PipelineQueue:
                 job = await queue.get()
                 try:
                     async with self._semaphore:
-                        result = await asyncio.to_thread(self._processor, job)
+                        if inspect.iscoroutinefunction(self._processor):
+                            result = await self._processor(job)
+                        else:
+                            # Старые синхронные обработчики и тестовые функции
+                            # по-прежнему уходят в пул потоков.
+                            result = await asyncio.to_thread(self._processor, job)
+                            if inspect.isawaitable(result):
+                                result = await result
                     job.future.set_result(result)
                 except Exception as exc:  # обработчик не должен убивать воркер
                     if not job.future.done():

@@ -1,13 +1,15 @@
 """Сервис конвейера: приём текста фразы и сохранение ``Utterance``.
 
 E1 — упрощённый режим без ИИ: слова ищутся в проверенном словаре, остальные
-показываются дактилем и попадают в очередь нераспознанных слов (FR-9). Здесь
-живёт общая серверная логика; HTTP-приём (E2), фоновые очереди и рассылка
-событий (E3) используют её, не дублируя разбор текста.
+показываются дактилем и попадают в очередь нераспознанных слов (FR-9). F4
+передаёт сюда готовые глоссы LLM/F2, ``gloss_ms`` и ``degraded``; без них
+``create_utterance`` по-прежнему работает путём E1. HTTP-приём (E2), фоновые
+очереди и рассылка событий (E3) используют сервис, не дублируя разбор текста.
 """
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -152,6 +154,15 @@ def _clean_lang(lang: str | None, room: Room) -> str:
     return lang
 
 
+def sign_language_for_utterance(room: Room, lang: str | None = None) -> str:
+    """Язык жестов фразы с учётом явного языка и языка комнаты.
+
+    F4 вычисляет язык до вызова LLM, поэтому проверка вынесена в публичную
+    функцию: очередь не обращается к приватному ``_clean_lang``.
+    """
+    return _clean_lang(lang, room)
+
+
 def verified_sign_glosses(lang: str) -> dict[str, str]:
     """Карта «нормализованная глосса → глосса из БД» для проверенных жестов.
 
@@ -177,8 +188,17 @@ def create_utterance(
     lang: str | None = None,
     asr_ms: int | None = None,
     started_at=None,
+    glosses: dict | None = None,
+    gloss_ms: int | None = None,
+    degraded: bool = False,
 ) -> Utterance:
-    """Разобрать текст, сохранить фразу и отметить незнакомые слова.
+    """Сохранить фразу и отметить незнакомые слова.
+
+    Без ``glosses`` работает прежний путь E1: точная форма из проверенного
+    словаря или дактиль. F4 передаёт готовые глоссы LLM/F2 и измеренный
+    ``gloss_ms``; ``degraded`` означает «показано только субтитрами» или
+    упрощённый режим. В переданных глоссах сервер всё равно подставляет
+    авторитетные ``text``/``lang``.
 
     Порядковый номер ``seq`` выдаётся внутри транзакции под блокировкой строки
     комнаты: две одновременные фразы одной комнаты не получат один номер (ТЗ
@@ -186,20 +206,28 @@ def create_utterance(
     при сбое сохранения фразы счётчики не разъедутся.
 
     ``asr_ms`` заполняется, когда текст пришёл из распознавания речи (E2);
-    ``gloss_ms`` измеряется здесь. ``display_lag_ms`` заполняет consumer,
+    ``gloss_ms`` измеряется здесь для E1. ``display_lag_ms`` заполняет consumer,
     когда студент присылает ``display_started`` (E4).
     """
     started_at = started_at or timezone.now()
     clean_text = normalize_text(text)
     sign_lang = _clean_lang(lang, room)
 
-    started = perf_counter()
-    glosses = build_simplified_glosses(
-        clean_text,
-        lang=sign_lang,
-        signs=verified_sign_glosses(sign_lang),
-    )
-    gloss_ms = max(0, round((perf_counter() - started) * 1000))
+    if glosses is None:
+        started = perf_counter()
+        glosses = build_simplified_glosses(
+            clean_text,
+            lang=sign_lang,
+            signs=verified_sign_glosses(sign_lang),
+        )
+        measured_gloss_ms = max(0, round((perf_counter() - started) * 1000))
+    else:
+        if not isinstance(glosses, dict) or not isinstance(glosses.get("tokens"), list):
+            raise UtteranceValidationError("Глоссы фразы должны содержать список токенов.")
+        glosses = copy.deepcopy(glosses)
+        glosses["lang"] = sign_lang
+        glosses["text"] = clean_text
+        measured_gloss_ms = max(0, int(gloss_ms or 0))
 
     # Каждое вхождение незнакомого слова увеличивает счётчик очереди (FR-9).
     unknown_lemmas = [
@@ -216,7 +244,8 @@ def create_utterance(
             text=clean_text,
             glosses=glosses,
             asr_ms=asr_ms,
-            gloss_ms=gloss_ms,
+            gloss_ms=measured_gloss_ms,
+            degraded=degraded,
             started_at=started_at,
         )
         if unknown_lemmas:

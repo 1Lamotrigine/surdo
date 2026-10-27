@@ -124,7 +124,7 @@ def clip_refs_for_glosses(glosses: dict) -> list[dict]:
 
 
 def utterance_event(utterance) -> dict:
-    """Событие ``utterance``: глоссы E1 плюс клипы словаря."""
+    """Событие ``utterance``: глоссы конвейера (E1/F4) плюс клипы словаря."""
     payload = utterance.as_event()
     payload["clips"] = clip_refs_for_glosses(utterance.glosses)
     return payload

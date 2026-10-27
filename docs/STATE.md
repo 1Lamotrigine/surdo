@@ -4,9 +4,9 @@
 
 ## Текущий этап
 
-**F3 — сжатие длинной фразы: готов.**
+**F4 — подключение LLM-глосс к конвейеру: готов.**
 
-Предыдущие этапы: **F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
+Предыдущие этапы: **F3 — сжатие, F2 — запасной режим, F1 — LLM-глоссы, E5 — панель преподавателя: готовы.**
 
 ## Что готово
 
@@ -17,7 +17,8 @@
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
   `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`, `AVATAR_MODEL_URL`,
   `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
-  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`.
+  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`,
+  `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_URL`, `LLM_TIMEOUT`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
   `dj-database-url`; соединения с `conn_max_age=60`.
 - Статика через WhiteNoise (`CompressedManifestStaticFilesStorage`).
@@ -480,7 +481,7 @@
 - **LLM-глоссы (F1):** `services/gloss.py` — чистый модуль без Django.
   `LLMProvider` (Protocol) получает промпт и JSON-схему, возвращает строку;
   `CallableProvider` адаптирует функцию, провайдер по умолчанию задаётся
-  `set_default_provider` (его настроит F4). `gloss_response_schema` описывает
+  `set_default_provider` (F4 строит его из настроек). `gloss_response_schema` описывает
   ответ ТЗ 7.2 (`lang`, `text`, `sentence_type`, `tokens` типов
   `sign`/`number`/`fingerspell`, `unknown`). `build_gloss_prompt` собирает
   правила РЖЯ, проверенные глоссы, few-shot примеры и схему;
@@ -516,6 +517,18 @@
   `target_ratio` — строго от 0 до 1; `compress_response_schema` и
   `build_compress_prompt` публичные. Для длинной фразы результат всегда короче
   исходной; фразу из одного короткого слова сжимать нечего.
+- **Конвейер LLM-глосс (F4):** `services/llm.py` — HTTP-провайдер на stdlib
+  (`urlopen`) для OpenAI-compatible API и Ollama; создаётся из
+  `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY`/`LLM_API_URL` только при заданной
+  модели (для API ещё и ключе), иначе LLM считается ненастроенной.
+  `pipeline/gloss_engine.py` собирает `GlossDictionary` из проверенных жестов и
+  `DictionaryVersion.current`, вызывает `to_glosses`; в async-пути словарь
+  читается через `database_sync_to_async`, а блокирующий HTTP — через
+  `asyncio.to_thread` под `asyncio.wait_for(..., LLM_TIMEOUT)`. Нет провайдера →
+  F2-резерв и `degraded=True`; ошибка/битый ответ/таймаут настроенной LLM →
+  пустые `tokens` (только субтитры) и `degraded=True`. Очередь по умолчанию
+  использует async-обработчик, а сохранение фразы принимает готовые глоссы,
+  `gloss_ms` и `degraded`; `create_utterance` без них остаётся путём E1.
 - `Makefile`: `setup`, `check`, `lint`, `format`, `test`, `up`, `down`, `migrate`,
   `seed-admin`, `client-dev`, `client-build`, `client-typecheck`, `client-test`.
 - `pytest-django` + `ruff`, конфигурация в `pyproject.toml`.
@@ -578,6 +591,7 @@
 | Сервис LLM-глосс (F1) | `services/gloss.py` (`to_glosses`, `build_gloss_prompt`, `gloss_response_schema`, `GlossDictionary`, `GlossCache`, `LLMProvider`) |
 | Запасной режим глосс (F2) | `services/gloss.py:fallback_glosses`, `services/morphology.py` (`word_forms`, `lemmatize_word`, `is_function_word`) |
 | Сжатие фразы (F3) | `services/gloss.py:compress`, `compress_locally`, `build_compress_prompt`, `compress_response_schema` |
+| Конвейер LLM-глосс (F4) | `pipeline/gloss_engine.py` (`compute_glosses`, `compute_glosses_async`, `GlossOutcome`, `verified_gloss_dictionary`), `services/llm.py` (`HttpLLMProvider`, `provider_from_settings`), `pipeline/queue.py:process_text_job_async` |
 
 ## Клиент: режимы
 
@@ -759,6 +773,18 @@
   обрезка по границе слова, короткая фраза без изменений, длина результата на
   наборе длинных фраз при 0.4/0.6/0.8, отказ на неверный `target_ratio` и
   пустой текст, отсутствие вызова LLM при неверном коэффициенте.
+- `services/tests/test_llm.py` (F4) — провайдер не создаётся без модели/ключа,
+  OpenAI-compatible и Ollama конфигурации, тело запроса (промпт, схема,
+  `response_format`/`format`, auth, таймаут), разбор ответов, обёртка сетевых и
+  битых ответов.
+- `pipeline/tests/test_gloss_engine.py` (F4) — словарь только из проверенных
+  жестов текущей версии, LLM-глоссы без деградации, F2 без провайдера,
+  субтитры при ошибке/битом JSON, ограничение выдуманной глоссы, async-таймаут
+  с проверкой, что тикер event loop продолжает работать.
+- `pipeline/tests/test_f4_pipeline.py` (F4) — очередь по умолчанию сохраняет
+  LLM-глоссы, ставит `fingerspell` в очередь незнакомых слов, без провайдера
+  уходит в F2 с `degraded`, а зависший провайдер не задерживает `Future`:
+  фраза сохраняется только субтитрами.
 - `dictionary/tests/test_statuses.py` — чистые правила переходов: разрешённые и
   запрещённые пары, требуемые роли, `allowed_targets`, совпадение значений
   `StrEnum` и `TextChoices`.
@@ -1614,7 +1640,7 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
 - Парсер терпим к ```json-обёртке, строковым/дробным целым числам и забытым
   `letters` (дактиль достраивается по `src`), но строг к типам токенов,
   маркерам, `sentence_type` и структуре: невалидный ответ — `GlossFormatError`,
-  который F4 превратит в упрощённый режим.
+  который F4 превращает в деградацию (F2 без провайдера или только субтитры).
 - Кэш — LRU в памяти процесса, как очереди конвейера (один процесс uvicorn).
   Ключ — SHA-256 от нормализованной фразы, языка, версии и **содержимого**
   словаря и примеров: изменение словаря или few-shot не отдаёт старые глоссы,
@@ -1624,8 +1650,9 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
   испортить закэшированные глоссы. Интерфейс `get`/`set` позволит позже положить
   под него `django.core.cache`, не меняя `to_glosses`.
 - Провайдер по умолчанию — модульная настройка (`set_default_provider`), а не
-  чтение `settings` внутри сервиса: F1 не подключает Django, а F4 выберет
-  провайдера из `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY` и таймаута один раз.
+  чтение `settings` внутри сервиса: F1 не подключает Django, а F4 собирает
+  HTTP-провайдера из `LLM_PROVIDER`/`LLM_MODEL`/`LLM_API_KEY`/`LLM_API_URL` и
+  `LLM_TIMEOUT` (или берёт явно заданный провайдер для тестов).
 
 ## Проверка F2
 
@@ -1709,12 +1736,62 @@ make check          # ruff + tsc + vitest (256) + pytest (426) + vite build — 
   функцию, которую F8 вызовет при жёлтом/красном отставании вместе с
   ускорением клипов.
 
+## Проверка F4
+
+```bash
+.venv/bin/python -m pytest services/tests/test_llm.py \
+  pipeline/tests/test_gloss_engine.py pipeline/tests/test_f4_pipeline.py -q
+```
+
+Тесты не ходят в сеть: HTTP-провайдер проверяется подменой `urlopen`, LLM —
+`CallableProvider`, а таймаут — провайдером, который ждёт событие. Проверяется
+и то, что за время ожидания LLM цикл событий выполняет тикер, и то, что
+`Future` очереди завершается раньше зависшего провайдера. Полный прогон —
+552 pytest.
+
+## Решения F4
+
+- Граница «нет провайдера» и «провайдер сломался» разная. Если LLM вообще не
+  настроена (пустые модель/ключ), показываем пословные жесты F2 с
+  `degraded=True`: это предохранитель ТЗ 5.3 и полезная деградация. Если же
+  настроенная LLM упала, вернула мусор или не уложилась в таймаут — жесты не
+  показываем вовсе, только субтитры, как прямо требует F4 и ТЗ 5.7: лучше
+  молчать жестами, чем показать неверный перевод.
+- `pipeline/gloss_engine.py` отделён от `services/gloss.py`: сервис остаётся
+  чистым и не знает Django, а движок собирает словарь из БД, выбирает провайдера
+  и превращает сбои в `GlossOutcome`. `GlossOutcome` несёт `degraded`,
+  `source` и измеренный `elapsed_ms`; в событие уходит только `degraded`, а
+  причина остаётся в логах/тестах.
+- В async-пути словарь читается через `database_sync_to_async`, а не внутри
+  `to_thread`: поток LLM не трогает ORM и не оставляет там соединение. После
+  чтения словаря и после задания очередь закрывает соединения фонового потока,
+  иначе долгоживущий цикл удерживал бы их между редкими фразами.
+- Таймаут двойной: `asyncio.wait_for` жёстко ограничивает ожидание, а тот же
+  `LLM_TIMEOUT` передаётся в `urlopen`, чтобы HTTP-запрос тоже завершился.
+  `wait_for` отменяет ожидание, но не умеет убить поток; просроченный поток
+  доработает в фоне, а его результат будет отброшен. Поэтому event loop и
+  consumer не блокируются.
+- Провайдер из настроек не создаётся без `LLM_MODEL`, а для OpenAI-compatible
+  API — без `LLM_API_KEY`: иначе `.env.example` с пустыми значениями отправлял
+  бы каждый тест и каждую фразу в сеть. Для Ollama ключ не нужен, URL по
+  умолчанию — локальный `127.0.0.1:11434`.
+- `LLM_API_URL` необязателен и позволяет указать прокси/свой endpoint;
+  `LLM_TIMEOUT` по умолчанию 8 с (ориентир ТЗ 5.7). Оба значения добавлены в
+  `.env.example`.
+- `create_utterance` сохраняет обратную совместимость E1: без аргумента
+  `glosses` он по-прежнему строит упрощённые глоссы. F4 передаёт готовый объект,
+  `gloss_ms` и `degraded`; сервер сам подставляет в него нормализованные
+  `text`/`lang`, а `unknown` очереди пересобирает из токенов `fingerspell`.
+- Очередь научилась принимать async-обработчик, но старые синхронные функции и
+  тестовые процессоры продолжают работать через `asyncio.to_thread`. Это
+  сохранило E2-тесты и позволило F4 не запускать вложенный `asyncio.run` на
+  каждом задании (он ждал бы executor при таймауте).
+
 ## Дальше
 
-**F3 готов.** Следующий — F4 ★: подключение `to_glosses` к конвейеру вместо
-упрощённых глоссов E1, вызов через `asyncio.to_thread`, таймауты LLM и запасной
-режим F2 с флагом `degraded`. Затем F5/F6 (Whisper и приём аудио) и F8
-(пороги отставания, ускорение и `compress`). Читать: `docs/spec/api.md`,
-`docs/spec/architecture.md`, `docs/spec/ws-events.md`,
-`services/gloss.py`, `pipeline/services.py`, `pipeline/queue.py`.
+**F4 готов.** Следующий — F5: `services.asr` с faster-whisper (модель грузится
+один раз), пул потоков и семафор, затем F6 — приём аудио фразы. После блока
+голоса останутся F7 (микрофон/VAD) и F8 (пороги отставания, ускорение и
+`compress`). Для ручной проверки F4 нужен реальный ключ/модель LLM в `.env` и
+`LLM_PROVIDER=openai|ollama`; без них конвейер работает в режиме F2.
 
