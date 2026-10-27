@@ -24,6 +24,7 @@
 | django-vite | 3.2.0 |
 | htmx | 2.0.11 |
 | segno (QR, SVG) | 1.6.6 |
+| pymorphy3 | 2.0.6 |
 | pytest / pytest-django / ruff | 9.1.1 / 4.14.0 / 0.17.3 |
 | daphne (только тесты Channels) | 4.2.3 |
 

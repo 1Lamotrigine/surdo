@@ -30,6 +30,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from services.morphology import FUNCTION_POS, split_words, word_forms
+
 # Типы предложения и маркеры из ТЗ 7.2. Маркеры управляют мимикой и поворотом
 # головы аватара, поэтому неизвестные значения не пропускаются.
 SENTENCE_TYPES = ("statement", "question", "exclamation", "imperative")
@@ -51,6 +53,57 @@ _LATIN_TO_CYRILLIC = {
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 _NUMBER_RE = re.compile(r"^-?\d+$")
+
+# Числительные словами: в глоссах число должно быть токеном ``number``, а не
+# дактилем (ТЗ 7.2, пример «странице десять»). Формы даны как в тексте, включая
+# родовые («одна», «две») и падежные варианты тысяч.
+_NUMBER_WORDS = {
+    "ноль": 0,
+    "нуль": 0,
+    "один": 1,
+    "одна": 1,
+    "одно": 1,
+    "два": 2,
+    "две": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9,
+    "десять": 10,
+    "одиннадцать": 11,
+    "двенадцать": 12,
+    "тринадцать": 13,
+    "четырнадцать": 14,
+    "пятнадцать": 15,
+    "шестнадцать": 16,
+    "семнадцать": 17,
+    "восемнадцать": 18,
+    "девятнадцать": 19,
+    "двадцать": 20,
+    "тридцать": 30,
+    "сорок": 40,
+    "пятьдесят": 50,
+    "шестьдесят": 60,
+    "семьдесят": 70,
+    "восемьдесят": 80,
+    "девяносто": 90,
+    "сто": 100,
+    "двести": 200,
+    "триста": 300,
+    "четыреста": 400,
+    "пятьсот": 500,
+    "шестьсот": 600,
+    "семьсот": 700,
+    "восемьсот": 800,
+    "девятьсот": 900,
+    "тысяча": 1000,
+    "тысячи": 1000,
+    "тысяч": 1000,
+}
+
 
 
 class GlossError(Exception):
@@ -501,6 +554,77 @@ def restrict_to_dictionary(glosses: Mapping[str, Any], dictionary: GlossDictiona
         "lang": glosses["lang"],
         "text": glosses["text"],
         "sentence_type": glosses["sentence_type"],
+        "tokens": tokens,
+        "unknown": unknown,
+    }
+
+
+def fallback_glosses(
+    text: str,
+    lang: str,
+    dictionary_version: GlossDictionary,
+) -> dict:
+    """Запасной режим без LLM: лемматизация и пословный перевод (F2).
+
+    Слово ищется в словаре сначала в исходной форме, затем по нормальным формам
+    ``pymorphy3`` («учебнике» → «учебник»). Числительные словами становятся
+    токеном ``number``, остальные значимые слова — ``fingerspell`` и попадают в
+    ``unknown``. Служебные части речи (предлоги, союзы, частицы, междометия)
+    без жеста опускаются: в жестовой фразе они не показываются. Для казахского
+    жестового языка русская морфология не применяется — только точная форма.
+    """
+    clean_text = _normalize_text(text)
+    if not clean_text:
+        raise GlossValidationError("Фраза для глосс не может быть пустой.")
+    if lang != dictionary_version.lang:
+        raise GlossValidationError(
+            f"Язык {lang!r} не совпадает с языком словаря {dictionary_version.lang!r}."
+        )
+
+    tokens: list[dict] = []
+    unknown: list[str] = []
+    for word in split_words(clean_text):
+        if word.isdigit():
+            tokens.append({"type": "number", "value": int(word), "src": word, "markers": []})
+            continue
+        numeral = _NUMBER_WORDS.get(normalize_gloss(word))
+        if numeral is not None:
+            tokens.append(
+                {"type": "number", "value": numeral, "src": word, "markers": []}
+            )
+            continue
+
+        forms = word_forms(word) if dictionary_version.lang == "rsl" else ()
+        canonical = dictionary_version.canonical(word)
+        if canonical is None:
+            for form in forms:
+                canonical = dictionary_version.canonical(form.normal_form)
+                if canonical is not None:
+                    break
+
+        if canonical is not None:
+            tokens.append(
+                {"type": "sign", "gloss": canonical, "src": word, "markers": []}
+            )
+            continue
+        if any(form.pos in FUNCTION_POS for form in forms):
+            continue
+
+        tokens.append(
+            {
+                "type": "fingerspell",
+                "letters": _letters_for_word(word),
+                "src": word,
+                "markers": [],
+            }
+        )
+        if word not in unknown:
+            unknown.append(word)
+
+    return {
+        "lang": lang,
+        "text": clean_text,
+        "sentence_type": _sentence_type_from_text(clean_text),
         "tokens": tokens,
         "unknown": unknown,
     }
