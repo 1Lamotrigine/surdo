@@ -23,10 +23,6 @@
       <div class="wrap header-inner">
         <a class="brand" href="/">Жест<span>·</span>Прототип</a>
         <div class="header-actions">
-          <div class="badges">
-            <span class="badge">MVP · русский / РЖЯ</span>
-            <span class="badge client-badge" data-client-status data-state="loading" aria-live="polite">Клиент: загрузка…</span>
-          </div>
           <nav class="auth-nav" aria-label="Аккаунт">
             {% if user.is_authenticated %}
               <span class="auth-name">{{ user.name|default:user.email }}</span>

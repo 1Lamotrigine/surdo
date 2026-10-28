@@ -157,24 +157,6 @@ body {
   font-size: 0.85rem;
 }
 
-.badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.client-badge[data-state="ready"] {
-  border-color: #15803d;
-  color: #15803d;
-  background: #f0fdf4;
-}
-
-.client-badge[data-state="error"] {
-  border-color: #b91c1c;
-  color: #b91c1c;
-  background: #fef2f2;
-}
-
 main {
   flex: 1;
   padding-block: 3.5rem;
@@ -893,66 +875,6 @@ h1 {
   max-width: 38rem;
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-  gap: 1rem;
-  margin-top: 3rem;
-}
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.4rem;
-}
-
-.card h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.05rem;
-}
-
-.card ul {
-  margin: 0;
-  padding-left: 1.1rem;
-  color: var(--muted);
-}
-
-.card li + li {
-  margin-top: 0.4rem;
-}
-
-.card p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.card.muted {
-  background: #eef1f8;
-}
-
-.htmx-demo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem 1.5rem;
-  align-items: center;
-  margin-top: 2rem;
-  padding: 1.4rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.htmx-demo h2 {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-}
-
-.htmx-demo p {
-  margin: 0;
-  color: var(--muted);
-}
-
 .button {
   border: 0;
   border-radius: 0.65rem;
@@ -966,20 +888,6 @@ h1 {
 
 .button:hover {
   background: #1e40af;
-}
-
-.htmx-result {
-  grid-column: 1 / -1;
-  min-height: 2.75rem;
-  padding: 0.75rem 1rem;
-  border: 1px dashed var(--border);
-  border-radius: 0.65rem;
-  color: var(--muted);
-}
-
-.htmx-result p {
-  margin: 0;
-  color: var(--text);
 }
 
 .auth-card {
@@ -1424,10 +1332,6 @@ button:focus-visible {
 
   .header-actions {
     justify-content: flex-start;
-  }
-
-  .htmx-demo {
-    grid-template-columns: 1fr;
   }
 
   .room-grid,

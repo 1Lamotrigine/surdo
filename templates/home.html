@@ -37,47 +37,4 @@
       {% endif %}
     </div>
   </section>
-
-  <section class="cards" aria-label="Что уже готово и что дальше">
-    <article class="card">
-      <h2>Готово</h2>
-      <ul>
-        <li>Пользователи, роли и вход по email.</li>
-        <li>Комнаты с коротким ID, QR-кодом и крупным режимом для проектора.</li>
-        <li>Вход студента по ID и имени без регистрации.</li>
-        <li>Vite, TypeScript и HTMX в клиенте.</li>
-      </ul>
-    </article>
-
-    <article class="card">
-      <h2>Дальше</h2>
-      <ul>
-        <li>A8 — WebSocket, presence и изоляция комнат.</li>
-        <li>A9 — чат комнаты.</li>
-        <li>A10 — закрытие комнаты и смена ID.</li>
-      </ul>
-    </article>
-
-    <article class="card muted">
-      <h2>Демо-режим</h2>
-      <p>
-        До появления проверенных жестов словаря включён демо-режим комнаты с заметной
-        пометкой: «прототип, жест не проверен носителем».
-      </p>
-    </article>
-  </section>
-
-  <section class="htmx-demo" aria-labelledby="htmx-title">
-    <div>
-      <h2 id="htmx-title">Проверка HTMX</h2>
-      <p>Кнопка загружает фрагмент с сервера и подставляет его без перезагрузки страницы.</p>
-    </div>
-    <button class="button" type="button"
-            hx-get="{% url 'htmx-demo' %}" hx-target="#htmx-result" hx-swap="innerHTML">
-      Загрузить фрагмент
-    </button>
-    <div id="htmx-result" class="htmx-result" aria-live="polite">
-      Фрагмент ещё не загружен.
-    </div>
-  </section>
 {% endblock %}

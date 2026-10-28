@@ -2,9 +2,11 @@ name: gluho-nemye-django
 
 # Продакшен-конфигурация (G4). Все настройки берутся из `.env`.
 # Локальная разработка использует те же сервисы; порты db/redis привязаны к
-# 127.0.0.1, наружу смотрят только Caddy (:80/:443).
+# 127.0.0.1. Сайт доступен и через Caddy (:80/:443), и напрямую на :8000
+# (uvicorn проброшен на хост для отладки и запуска скрипта нагрузки).
 #
 # WebSocket-ы Caddy проксирует сам, отдельной настройки не нужно.
+# `docker compose up` поднимает весь проект: db, redis, web и caddy.
 
 x-logging: &default-logging
   driver: json-file
@@ -60,6 +62,10 @@ services:
         condition: service_healthy
     volumes:
       - media:/app/media
+    # 8000 проброшен на хост, чтобы Django был доступен и напрямую, и через
+    # Caddy (:80). `expose` оставлен для проксирования внутри сети Docker.
+    ports:
+      - "8000:8000"
     expose:
       - "8000"
     healthcheck:

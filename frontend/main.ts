@@ -7,11 +7,6 @@ import { setupPwa } from "./pwa";
  * Модули аватара и записи жестов подключаются только на своих страницах.
  */
 function markClientReady(): void {
-  const status = document.querySelector<HTMLElement>("[data-client-status]");
-  if (status) {
-    status.dataset.state = "ready";
-    status.textContent = `Клиент: Vite + HTMX ${htmx.version}`;
-  }
   document.documentElement.dataset.htmxVersion = htmx.version;
   console.info(`[client] Vite module loaded, HTMX ${htmx.version}`);
 }
