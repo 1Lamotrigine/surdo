@@ -15,6 +15,8 @@ import {
   glbJson,
   isVrmaJson,
   loadAnimationBundle,
+  pickAnimationClip,
+  type AnimationBundle,
 } from "./animation-clip";
 
 const GLB_MAGIC = 0x46546c67;
@@ -78,6 +80,28 @@ describe("animationCount", () => {
     expect(animationCount(payload())).toBe(1);
     expect(animationCount(payload({ animations: [{}, {}, {}] }))).toBe(3);
     expect(animationCount(payload({ animations: undefined }))).toBe(0);
+  });
+});
+
+describe("pickAnimationClip", () => {
+  const bundle = {
+    clips: [{ name: "uchebnik" }, { name: "daktil_a" }],
+    vrma: false,
+    url: "https://example.test/g.glb",
+  } as unknown as AnimationBundle;
+
+  it("без имени берёт первую анимацию файла", () => {
+    expect(pickAnimationClip(bundle)?.name).toBe("uchebnik");
+    expect(pickAnimationClip(bundle, "  ")?.name).toBe("uchebnik");
+  });
+
+  it("выбирает запись по имени", () => {
+    expect(pickAnimationClip(bundle, "daktil_a")?.name).toBe("daktil_a");
+  });
+
+  it("не подменяет отсутствующую запись первой", () => {
+    expect(pickAnimationClip(bundle, "net-takoy")).toBeNull();
+    expect(pickAnimationClip({ ...bundle, clips: [] }, "uchebnik")).toBeNull();
   });
 });
 

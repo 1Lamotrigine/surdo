@@ -35,11 +35,11 @@ app/assets/model/        # модель: avatar.vrm (любое имя)
 app/assets/animations/   # жесты: uchebnik.glb, daktil_a.vrma, cifra_5.glb …
 ```
 
-Один жест — один файл, имя = транслит глоссы. Затем файлы попадают в `media/`
-и в словарь:
+Один жест — один файл **или** один файл с несколькими именованными жестами
+(см. «Файл с несколькими жестами»). Затем файлы попадают в `media/` и в словарь:
 
-- **Анимации** — загрузкой через API (см. «Загрузка в словарь»); файл из
-  `assets/animations/` передаётся полем `animation`.
+- **Анимации** — загрузкой через API (см. «Загрузка в словарь») или командой
+  `import_animations`; файл из `assets/animations/` передаётся полем `animation`.
 - **Модель** — скопировать в медиа-том и указать URL:
   ```bash
   docker compose cp assets/model/avatar.vrm web:/app/media/avatar/avatar.vrm
@@ -52,19 +52,23 @@ app/assets/animations/   # жесты: uchebnik.glb, daktil_a.vrma, cifra_5.glb 
 
 ## Как подготовить анимации
 
-1. Один жест — **один файл с одной анимацией**. Несколько жестов в одном `.glb`
-   допустимы технически, но конвейер берёт первую анимацию.
+1. Один жест — одна анимация. Записей может быть несколько: либо по файлу на
+   жест, либо один файл с несколькими анимациями (имя каждой = глосса).
 2. Имя файла — транслит глоссы (как у landmarks): `uchebnik.glb`,
-   `daktil_a.vrma`, `cifra_5.vrma`. Имя внутри модели ни на что не влияет.
-3. Глоссы дактиля и чисел — по конвенции конвейера:
+   `daktil_a.vrma`, `cifra_5.vrma`, либо общее `gestures.glb`. Имя файла ни на
+   что не влияет, если жест выбирается по имени анимации.
+3. Имена анимаций внутри файла — глоссы: `УЧЕБНИК`, `ДАКТИЛЬ_А`, `ЦИФРА_5`.
+   Именно по ним `import_animations` создаёт жесты; `--map` задаёт соответствие
+   вручную, если имена в Blender другие.
+4. Глоссы дактиля и чисел — по конвенции конвейера:
    `ДАКТИЛЬ_А` … `ДАКТИЛЬ_Я`, `ЦИФРА_0` … `ЦИФРА_9`.
-4. Скелет модели — стандартный VRM humanoid. Код обращается к костям по именам
+5. Скелет модели — стандартный VRM humanoid. Код обращается к костям по именам
    `hips`, `spine`, `chest`, `neck`, `head`, `left/rightUpperArm`,
    `left/rightLowerArm`, `left/rightHand`, `left/rightUpperLeg`,
    `left/rightLowerLeg`, пальцы `*IndexProximal` и т. д. (см. `vrm-rig.ts`).
    Мимика — выражения `blinkLeft/Right`, `aa/ee/ih/oh/ou`.
-5. Длительность: 0.5–2.5 с на жест, нейтральная поза в начале и конце.
-6. Экспорт:
+6. Длительность: 0.5–2.5 с на жест, нейтральная поза в начале и конце.
+7. Экспорт:
    - **GLB с анимацией** (проще всего): Blender → File → Export → glTF 2.0,
      формат `glTF Binary (.glb)`, включить Animation. Работает, если имена узлов
      совпадают с узлами VRM (обычно да, если анимируете тот же скелет).
@@ -85,28 +89,65 @@ curl -X POST http://localhost/api/signs/ \
   -F "animation=@uchebnik.vrma"
 ```
 
-Ответ `201` содержит `clips[0].format = "animation"` и `url`, оканчивающийся на
-`.vrma`/`.glb`. Файл проверяется (`services/clips.py: parse_animation`): сигнатура
-`glTF`, версия 2, целостность длины, JSON-чанк, наличие хотя бы одной анимации,
-лимит `CLIP_MAX_ANIMATION_BYTES` (20 МиБ по умолчанию). Дальше — обычный путь:
-жест создаётся `draft`, эксперт проверяет и утверждает, версия словаря растёт.
+Ответ `201` содержит `clips[0].format = "animation"`, `animation_name` (какая
+запись выбрана) и `url`, оканчивающийся на `.vrma`/`.glb`. Файл проверяется
+(`services/clips.py: parse_animation`): сигнатура `glTF`, версия 2, целостность
+длины, JSON-чанк, наличие хотя бы одной анимации, лимит
+`CLIP_MAX_ANIMATION_BYTES` (20 МиБ по умолчанию). Дальше — обычный путь: жест
+создаётся `draft`, эксперт проверяет и утверждает, версия словаря растёт.
 
 Загружать `clip` (landmarks) и `animation` одновременно нельзя — ответ `400`.
+
+## Файл с несколькими жестами
+
+Один `.glb`/`.vrma` может содержать несколько анимаций. Жест выбирает нужную по
+имени: `SignClip.animation_name` (пусто = первая запись). Имя совпадает с
+`animations[].name` в glTF, то есть с именем action/дорожки в Blender.
+
+Через API — добавить поле `animation_clip`:
+
+```bash
+curl -X POST http://localhost/api/signs/ \
+  -F "gloss=ДАКТИЛЬ_А" -F "lang=rsl" \
+  -F "animation_clip=daktil_a" \
+  -F "animation=@gestures.glb"
+```
+
+Массовый импорт — команда (файл сохраняется **один раз** на все жесты):
+
+```bash
+# имена анимаций = глоссы
+python manage.py import_animations assets/animations/gestures.glb --lang rsl
+
+# свои имена/глоссы и только часть записей
+python manage.py import_animations assets/animations/gestures.glb \
+  --map "УЧЕБНИК=uchebnik" --map "ДАКТИЛЬ_А=daktil_a"
+python manage.py import_animations gestures.glb --only uchebnik
+
+# посмотреть план без записи
+python manage.py import_animations gestures.glb --dry-run
+```
+
+Повторный запуск идемпотентен: уже импортированные пары «глосса + имя анимации»
+пропускаются. Файл кладётся в `media/clips/import/<имя>-<хеш>.<ext>`; все
+`SignClip` ссылаются на один путь. Если у жеста уже есть клип, импорт добавит
+новую версию. Смена имени анимации считается новым клипом.
 
 ## Что уже реализовано
 
 | Слой | Файл | Что делает |
 | --- | --- | --- |
-| Модель | `dictionary/models.py` | `ClipFormat`, `SignClip.format`, `file_url()` с расширением, `best_clip` с приоритетом анимации |
-| Валидация | `services/clips.py` | `parse_animation`, `glb_json`, `AnimationMeta`, лимит размера |
-| Сервис | `dictionary/services.py` | `create_sign(animation=…, animation_name=…)`, `_attach_animation` |
-| HTTP | `dictionary/api.py` | поле `animation` (multipart), `413` на превышение, `400` на оба файла |
+| Модель | `dictionary/models.py` | `ClipFormat`, `SignClip.format`, `SignClip.animation_name`, `file_url()` с расширением, `best_clip` с приоритетом анимации |
+| Валидация | `services/clips.py` | `parse_animation`, имена и длительности записей, `glb_json`, лимит размера |
+| Сервис | `dictionary/services.py` | `create_sign(animation=…, animation_clip=…)`, `_attach_animation` |
+| Импорт | `dictionary/management/commands/import_animations.py` | один файл → много жестов, файл хранится один раз, `--map`/`--only`/`--dry-run` |
+| HTTP | `dictionary/api.py` | поля `animation` и `animation_clip`, `413` на превышение, `400` на оба файла |
 | Отдача | `config/urls.py`, `dictionary/views.py` | `/media/clips/<id>.<ext>`, `model/gltf-binary`, ETag/304 |
-| События | `pipeline/events.py` | `format` в ссылке на клип, приоритет анимации |
-| Клиент | `frontend/animation-clip.ts` | разбор GLB, `loadAnimationBundle`, понятные ошибки |
+| События | `pipeline/events.py` | `format` и `animation_name` в ссылке на клип, приоритет анимации |
+| Клиент | `frontend/animation-clip.ts` | разбор GLB, `loadAnimationBundle`, `pickAnimationClip`, ошибки |
 | Клиент | `frontend/animation-player.ts` | очередь на `AnimationMixer`, crossfade, скорость |
-| Клиент | `frontend/room-phrase.ts` | фраза целиком из анимаций играется новым плеером |
-| Тесты | `tests/test_animation_clips.py`, `frontend/animation-*.test.ts` | 24 + 7 проверок |
+| Клиент | `frontend/room-phrase.ts` | кэш файлов, фраза целиком из анимаций новым плеером |
+| Тесты | `tests/test_animation_clips.py`, `frontend/animation-*.test.ts` | 33 + 16 проверок |
 
 ## Что осталось (чек-лист, когда модель готова)
 

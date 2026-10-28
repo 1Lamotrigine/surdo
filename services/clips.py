@@ -129,17 +129,37 @@ ANIMATION_EXTENSIONS = (".vrma", ".glb")
 
 @dataclass(frozen=True)
 class AnimationMeta:
-    """Метаданные анимационного клипа, прочитанные из GLB-контейнера."""
+    """Метаданные анимационного клипа, прочитанные из GLB-контейнера.
+
+    В одном GLB может лежать несколько анимаций-записей (H1): ``names`` и
+    ``durations_ms`` идут в том же порядке, что и ``animations`` в JSON. Жест
+    выбирает одну запись по имени (``SignClip.animation_name``), поэтому
+    длительность берётся не общая, а для конкретной записи.
+    """
 
     extension: str
     vrma: bool
     animations: int
     duration_ms: int
     size_bytes: int
+    names: tuple[str, ...] = ()
+    durations_ms: tuple[int, ...] = ()
 
     @property
     def format(self) -> str:
         return "animation"
+
+    def duration_for(self, name: str = "") -> int:
+        """Длительность записи по имени; без имени — первой в файле."""
+        if not self.durations_ms:
+            return self.duration_ms
+        if name:
+            try:
+                return self.durations_ms[self.names.index(name)]
+            except ValueError:
+                return self.duration_ms
+        return self.durations_ms[0]
+
 
 
 def glb_json(blob: bytes) -> dict:
@@ -185,38 +205,55 @@ def glb_json(blob: bytes) -> dict:
     return payload
 
 
-def _gltf_duration_ms(payload: dict) -> int:
-    """Длительность самой длинной анимации по ``max`` входных аксессоров.
+def _animation_durations_ms(payload: dict) -> list[int]:
+    """Длительность каждой анимации по ``max`` входных аксессоров, мс.
 
     В glTF у ``accessor`` для времени часто есть ``max``; если его нет,
-    длительность неизвестна и остаётся 0 (клиент возьмёт её из файла).
+    длительность записи неизвестна и остаётся 0 (клиент возьмёт её из файла).
+    Порядок результата совпадает с порядком ``animations`` в JSON.
     """
-    accessors = payload.get("accessors")
-    if not isinstance(accessors, list):
-        return 0
-    longest = 0.0
     animations = payload.get("animations")
     if not isinstance(animations, list):
-        return 0
+        return []
+    accessors = payload.get("accessors")
+    if not isinstance(accessors, list):
+        return [0] * len(animations)
+
+    durations: list[int] = []
     for animation in animations:
-        if not isinstance(animation, dict):
-            continue
-        samplers = animation.get("samplers")
-        if not isinstance(samplers, list):
-            continue
-        for sampler in samplers:
-            if not isinstance(sampler, dict):
-                continue
-            index = sampler.get("input")
-            if not isinstance(index, int) or not 0 <= index < len(accessors):
-                continue
-            accessor = accessors[index]
-            if not isinstance(accessor, dict):
-                continue
-            maximum = accessor.get("max")
-            if isinstance(maximum, list) and maximum and isinstance(maximum[0], (int, float)):
-                longest = max(longest, float(maximum[0]))
-    return round(longest * 1000)
+        longest = 0.0
+        samplers = animation.get("samplers") if isinstance(animation, dict) else None
+        if isinstance(samplers, list):
+            for sampler in samplers:
+                if not isinstance(sampler, dict):
+                    continue
+                index = sampler.get("input")
+                if not isinstance(index, int) or not 0 <= index < len(accessors):
+                    continue
+                accessor = accessors[index]
+                if not isinstance(accessor, dict):
+                    continue
+                maximum = accessor.get("max")
+                if (
+                    isinstance(maximum, list)
+                    and maximum
+                    and isinstance(maximum[0], (int, float))
+                ):
+                    longest = max(longest, float(maximum[0]))
+        durations.append(round(longest * 1000))
+    return durations
+
+
+def _animation_names(payload: dict) -> tuple[str, ...]:
+    """Имена анимаций в порядке JSON; безымянные записи — пустая строка."""
+    animations = payload.get("animations")
+    if not isinstance(animations, list):
+        return ()
+    names: list[str] = []
+    for animation in animations:
+        name = animation.get("name") if isinstance(animation, dict) else None
+        names.append(name.strip() if isinstance(name, str) else "")
+    return tuple(names)
 
 
 def parse_animation(
@@ -256,12 +293,15 @@ def parse_animation(
     if not suffix:
         suffix = ".vrma" if vrma else ".glb"
 
+    durations = _animation_durations_ms(payload)
     return AnimationMeta(
         extension=suffix.lstrip("."),
         vrma=vrma,
         animations=count,
-        duration_ms=_gltf_duration_ms(payload),
+        duration_ms=max(durations, default=0),
         size_bytes=len(blob),
+        names=_animation_names(payload),
+        durations_ms=tuple(durations),
     )
 
 

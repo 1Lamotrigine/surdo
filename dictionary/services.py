@@ -78,6 +78,7 @@ def sign_payload(sign: Sign, *, include_unverified_clip: bool = False) -> dict:
             {
                 "id": clip.pk,
                 "format": clip.format,
+                "animation_name": clip.animation_name,
                 "version": clip.version,
                 "fps": clip.fps,
                 "frames": clip.frames,
@@ -137,6 +138,7 @@ def create_sign(
     clip: bytes | None = None,
     animation: bytes | None = None,
     animation_name: str = "",
+    animation_clip: str = "",
     status: str = SignStatus.DRAFT,
     unknown_word: UnknownWord | None = None,
 ) -> Sign:
@@ -149,6 +151,10 @@ def create_sign(
     landmarks MediaPipe) или ``animation`` — готовая анимация (``.vrma``/``.glb``,
     ``animation_name`` задаёт имя файла и расширение). Передавать оба сразу
     нельзя.
+
+    В одном файле анимации может быть несколько записей: ``animation_clip``
+    выбирает нужную по имени (пусто — первая). Тогда один и тот же файл может
+    обслуживать несколько жестов; сервер проверяет, что запись существует.
 
     Если передан ``unknown_word`` (D4), слово должно быть взято в работу
     (``queued``): в той же транзакции оно становится ``recorded``. Так слово
@@ -177,6 +183,14 @@ def create_sign(
             animation_meta = parse_animation(animation, filename=animation_name)
         except ClipFormatError as exc:
             raise SignValidationError(str(exc)) from exc
+        clip_name = (animation_clip or "").strip()
+        if len(clip_name) > 120:
+            raise SignValidationError("Имя анимации длиннее 120 символов.")
+        if clip_name and clip_name not in animation_meta.names:
+            available = ", ".join(name or "(без имени)" for name in animation_meta.names)
+            raise SignValidationError(
+                f"В файле нет анимации «{clip_name}». Доступны: {available}."
+            )
 
     with transaction.atomic():
         sign = Sign.objects.create(
@@ -189,7 +203,7 @@ def create_sign(
         if clip is not None and meta is not None:
             _attach_clip(sign, clip, meta)
         if animation is not None and animation_meta is not None:
-            _attach_animation(sign, animation, animation_meta)
+            _attach_animation(sign, animation, animation_meta, clip_name=clip_name)
         if unknown_word is not None:
             try:
                 mark_unknown_word_recorded(unknown_word)
@@ -298,26 +312,39 @@ def _attach_clip(sign: Sign, blob: bytes, meta: ClipMeta) -> SignClip:
     )
 
 
-def _attach_animation(sign: Sign, blob: bytes, meta: AnimationMeta) -> SignClip:
+def _attach_animation(
+    sign: Sign,
+    blob: bytes,
+    meta: AnimationMeta,
+    *,
+    clip_name: str = "",
+    path: str | None = None,
+) -> SignClip:
     """Сохранить анимационный клип (VRMA/glTF) и создать запись ``SignClip``.
 
     У анимации нет кадров landmarks и фиксированного FPS: длительность берётся
-    из glTF (если её удалось прочитать), а ``frames`` остаётся 0. Показ идёт
-    через ``AnimationMixer``, который сам считает время по дорожкам.
+    из glTF для выбранной записи, а ``frames`` остаётся 0. Показ идёт через
+    ``AnimationMixer``, который сам считает время по дорожкам.
+
+    ``path`` позволяет переиспользовать уже сохранённый файл: один GLB может
+    содержать несколько жестов, и тогда он хранится один раз (импорт).
     """
-    slug = _ascii_slug(sign.gloss) or "sign"
-    name = f"{sign.pk}-{slug}-v{sign.clips.count() + 1}.{meta.extension}"
-    stamp = timezone.now().strftime("%Y/%m")
-    path = f"clips/{stamp}/{name}"
-    default_storage.save(path, blob)
+    version = sign.clips.count() + 1
+    if path is None:
+        slug = _ascii_slug(sign.gloss) or "sign"
+        name = f"{sign.pk}-{slug}-v{version}.{meta.extension}"
+        stamp = timezone.now().strftime("%Y/%m")
+        path = f"clips/{stamp}/{name}"
+        default_storage.save(path, blob)
     return SignClip.objects.create(
         sign=sign,
         file=path,
         format=ClipFormat.ANIMATION,
+        animation_name=clip_name,
         fps=settings.ANIMATION_DEFAULT_FPS,
-        duration_ms=meta.duration_ms,
+        duration_ms=meta.duration_for(clip_name),
         frames=0,
-        version=sign.clips.count() + 1,
+        version=version,
         size_bytes=len(blob),
     )
 

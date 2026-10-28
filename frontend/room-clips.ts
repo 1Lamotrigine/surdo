@@ -24,6 +24,8 @@ export type UtteranceClipRef = {
   gloss: string;
   url: string;
   format?: ClipFormat;
+  /** Имя анимации внутри GLB/VRMA; пусто — первая (H1). */
+  animation_name?: string;
   fps?: number;
   frames?: number;
   duration_ms?: number;
@@ -74,6 +76,8 @@ export function clipRefsFromEvent(utterance: UtteranceEvent): UtteranceClipRef[]
     kind: ref.kind === "number" || ref.kind === "fingerspell" ? ref.kind : "sign",
     gloss: typeof ref.gloss === "string" ? ref.gloss : "",
     format: ref.format === "animation" ? "animation" : "landmarks",
+    animation_name:
+      typeof ref.animation_name === "string" ? ref.animation_name : "",
   }));
 }
 

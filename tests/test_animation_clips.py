@@ -7,8 +7,11 @@ landmarks при показе фразы. Проигрывание провер�
 
 from __future__ import annotations
 
+from io import StringIO
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.urls import reverse
 
 from accounts.models import Role
@@ -60,6 +63,25 @@ def test_parse_animation_detects_vrma_by_filename():
 def test_parse_animation_default_extension_without_filename():
     assert parse_animation(make_glb()).extension == "glb"
     assert parse_animation(make_glb(vrma=True)).extension == "vrma"
+
+
+def test_parse_animation_reads_each_animation_name_and_duration():
+    blob = make_glb(names=["uchebnik", "daktil_a"], durations=[1.5, 0.75])
+
+    meta = parse_animation(blob, filename="gestures.glb")
+
+    assert meta.animations == 2
+    assert meta.names == ("uchebnik", "daktil_a")
+    assert meta.durations_ms == (1500, 750)
+    assert meta.duration_for("daktil_a") == 750
+    assert meta.duration_for("") == 1500
+    assert meta.duration_for("нет-такой") == meta.duration_ms == 1500
+
+
+def test_parse_animation_keeps_unnamed_animation_empty():
+    meta = parse_animation(make_glb(names=[""]), filename="g.glb")
+
+    assert meta.names == ("",)
 
 
 @pytest.mark.parametrize(
@@ -161,6 +183,34 @@ def test_create_sign_rejects_broken_animation(editor):
         )
 
 
+def test_create_sign_selects_animation_from_multi_file(settings, tmp_path, editor):
+    settings.MEDIA_ROOT = tmp_path
+
+    sign = create_sign(
+        recorded_by=editor,
+        gloss="ДАКТИЛЬ_А",
+        animation=make_glb(names=["uchebnik", "daktil_a"], durations=[1.5, 0.75]),
+        animation_name="gestures.glb",
+        animation_clip="daktil_a",
+    )
+
+    clip = sign.clips.get()
+    assert clip.animation_name == "daktil_a"
+    assert clip.duration_ms == 750
+    assert clip.file_ext == "glb"
+
+
+def test_create_sign_rejects_unknown_animation_name(editor):
+    with pytest.raises(SignValidationError, match="нет анимации"):
+        create_sign(
+            recorded_by=editor,
+            gloss="УЧЕБНИК",
+            animation=make_glb(names=["uchebnik"]),
+            animation_name="gestures.glb",
+            animation_clip="daktil_a",
+        )
+
+
 # --- HTTP API --------------------------------------------------------------
 
 
@@ -215,6 +265,31 @@ def test_api_rejects_oversized_animation(client, editor, settings):
     assert response.status_code == 413
 
 
+def test_api_selects_named_animation_from_multi_file(client, editor, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path
+    client.force_login(editor)
+    upload = SimpleUploadedFile(
+        "gestures.glb",
+        make_glb(names=["uchebnik", "daktil_a"], durations=[1.5, 0.75]),
+        content_type="model/gltf-binary",
+    )
+
+    response = client.post(
+        reverse("api-sign-create"),
+        {
+            "gloss": "ДАКТИЛЬ_А",
+            "lang": "rsl",
+            "animation": upload,
+            "animation_clip": "daktil_a",
+        },
+    )
+
+    assert response.status_code == 201
+    clip = response.json()["clips"][0]
+    assert clip["animation_name"] == "daktil_a"
+    assert clip["duration_ms"] == 750
+
+
 # --- Отдача файла и ссылки -------------------------------------------------
 
 
@@ -261,7 +336,12 @@ def test_landmark_url_is_unchanged(settings, tmp_path, editor):
 
 def test_events_include_clip_format():
     sign = Sign.objects.create(gloss="УЧЕБНИК", lang=Language.RSL, status=SignStatus.VERIFIED)
-    SignClip.objects.create(sign=sign, file="clips/x.vrma", format=ClipFormat.ANIMATION)
+    SignClip.objects.create(
+        sign=sign,
+        file="clips/x.vrma",
+        format=ClipFormat.ANIMATION,
+        animation_name="uchebnik",
+    )
 
     refs = clip_refs_for_glosses(
         {
@@ -272,6 +352,7 @@ def test_events_include_clip_format():
     )
 
     assert refs[0]["format"] == "animation"
+    assert refs[0]["animation_name"] == "uchebnik"
 
 
 def test_events_prefer_animation_over_landmarks():
@@ -300,3 +381,85 @@ def test_events_prefer_animation_over_landmarks():
     )
 
     assert refs[0]["id"] == animation.pk
+
+
+# --- Импорт одного файла с несколькими жестами ----------------------------
+
+
+def test_import_animations_stores_file_once_for_many_gestures(
+    settings, tmp_path, editor
+):
+    settings.MEDIA_ROOT = tmp_path
+    source = tmp_path / "gestures.glb"
+    source.write_bytes(
+        make_glb(names=["УЧЕБНИК", "ДАКТИЛЬ_А"], durations=[1.5, 0.75])
+    )
+
+    call_command(
+        "import_animations",
+        str(source),
+        "--user",
+        editor.email,
+        stdout=StringIO(),
+    )
+
+    clips = list(SignClip.objects.filter(format=ClipFormat.ANIMATION))
+    assert len(clips) == 2
+    paths = {clip.file.name for clip in clips}
+    assert len(paths) == 1
+    stored = tmp_path / paths.pop()
+    assert stored.is_file()
+
+    by_gloss = {clip.sign.gloss: clip for clip in clips}
+    assert by_gloss["УЧЕБНИК"].animation_name == "УЧЕБНИК"
+    assert by_gloss["УЧЕБНИК"].duration_ms == 1500
+    assert by_gloss["ДАКТИЛЬ_А"].duration_ms == 750
+    assert by_gloss["УЧЕБНИК"].version == 1
+
+
+def test_import_animations_is_idempotent(settings, tmp_path, editor):
+    settings.MEDIA_ROOT = tmp_path
+    source = tmp_path / "gestures.glb"
+    source.write_bytes(make_glb(names=["УЧЕБНИК", "ДАКТИЛЬ_А"]))
+
+    call_command("import_animations", str(source), stdout=StringIO())
+    call_command("import_animations", str(source), stdout=StringIO())
+
+    assert SignClip.objects.filter(format=ClipFormat.ANIMATION).count() == 2
+    assert Sign.objects.count() == 2
+
+
+def test_import_animations_supports_explicit_map(settings, tmp_path, editor):
+    settings.MEDIA_ROOT = tmp_path
+    source = tmp_path / "gestures.glb"
+    source.write_bytes(make_glb(names=["anim_1", "anim_2"], durations=[1.0, 2.0]))
+
+    call_command(
+        "import_animations",
+        str(source),
+        "--map",
+        "УЧЕБНИК=anim_2",
+        stdout=StringIO(),
+    )
+
+    clip = SignClip.objects.get()
+    assert clip.sign.gloss == "УЧЕБНИК"
+    assert clip.animation_name == "anim_2"
+    assert clip.duration_ms == 2000
+
+
+def test_import_animations_dry_run_writes_nothing(settings, tmp_path, editor):
+    settings.MEDIA_ROOT = tmp_path
+    source = tmp_path / "gestures.glb"
+    source.write_bytes(make_glb(names=["УЧЕБНИК"]))
+
+    call_command(
+        "import_animations",
+        str(source),
+        "--dry-run",
+        stdout=StringIO(),
+    )
+
+    assert Sign.objects.count() == 0
+    assert SignClip.objects.count() == 0
+    assert list((tmp_path / "clips").rglob("*.glb")) == []

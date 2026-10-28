@@ -2201,33 +2201,44 @@ production-сборка Vite. Сборка выпускает `vad-web-worker-*.
 
 ## H1: анимационные жесты (VRMA/glTF)
 
-- **Модель:** `dictionary.ClipFormat` (`landmarks`/`animation`) и
-  `SignClip.format` (миграция `0002_signclip_format`). У клипа появились
-  `is_animation`, `file_ext`, `file_url()` с расширением; `best_clip` и
-  `pipeline.events.select_best_clip` предпочитают анимацию landmarks.
+- **Модель:** `dictionary.ClipFormat` (`landmarks`/`animation`),
+  `SignClip.format` (миграция `0002_signclip_format`) и
+  `SignClip.animation_name` (миграция `0003_signclip_animation_name`) — какая
+  запись внутри файла. У клипа появились `is_animation`, `file_ext`,
+  `file_url()` с расширением; `best_clip` и `pipeline.events.select_best_clip`
+  предпочитают анимацию landmarks.
 - **Приём и хранение:** `services/clips.py:parse_animation` проверяет GLB
   (сигнатура, версия 2, длина, JSON-чанк, наличие анимаций, лимит
-  `CLIP_MAX_ANIMATION_BYTES` = 20 МиБ) и достаёт длительность из `max`
-  входных аксессоров. `create_sign(animation=…, animation_name=…)` сохраняет
-  файл `.vrma`/`.glb` и запись `SignClip(format=animation, frames=0,
-  duration_ms, fps=ANIMATION_DEFAULT_FPS)`. Оба файла одновременно — `400`.
-- **API и отдача:** `POST /api/signs/` принимает multipart-поле `animation`
-  (`413` на превышение); `format` есть в `sign_payload` и в ссылках на клипы
-  события `utterance`. Файл отдаётся по `/media/clips/<id>.<ext>` с
-  `model/gltf-binary`, ETag и `immutable`-кэшем.
-- **Клиент:** `frontend/animation-clip.ts` разбирает GLB и отдаёт
-  `AnimationBundle`; VRMA распознаётся и даёт `VrmaNotSupportedError` (пакет
+  `CLIP_MAX_ANIMATION_BYTES` = 20 МиБ), возвращает имена и длительности каждой
+  записи. `create_sign(animation=…, animation_name=…, animation_clip=…)`
+  сохраняет файл `.vrma`/`.glb` и запись `SignClip(format=animation,
+  animation_name, frames=0, duration_ms выбранной записи,
+  fps=ANIMATION_DEFAULT_FPS)`. Неизвестное имя записи — ошибка; оба файла
+  (landmarks + анимация) одновременно — `400`.
+- **Один файл — много жестов:** команда
+  `dictionary/management/commands/import_animations.py` читает GLB, по умолчанию
+  считает имя анимации глоссой (или `--map ГЛОССА=АНИМАЦИЯ`), создаёт жесты и
+  клипы, хранит файл один раз (`media/clips/import/<имя>-<хеш>.<ext>`),
+  идемпотентна; есть `--only` и `--dry-run`.
+- **API и отдача:** `POST /api/signs/` принимает multipart-поля `animation` и
+  `animation_clip` (`413` на превышение); `format`/`animation_name` есть в
+  `sign_payload` и в ссылках на клипы события `utterance`. Файл отдаётся по
+  `/media/clips/<id>.<ext>` с `model/gltf-binary`, ETag и `immutable`-кэшем.
+- **Клиент:** `frontend/animation-clip.ts` разбирает GLB, отдаёт
+  `AnimationBundle` и выбирает запись по имени (`pickAnimationClip`); VRMA
+  распознаётся и даёт `VrmaNotSupportedError` (пакет
   `@pixiv/three-vrm-animation` не подключён — новые зависимости только по
   просьбе). `frontend/animation-player.ts` играет очередь через
-  `AnimationMixer` с crossfade 150–250 мс, скоростью 0.6–1.3x и завершением.
-  `frontend/room-phrase.ts` играет фразу целиком из анимаций; смешанная фраза
-  (анимации + дактиль landmarks) пока показывает только landmarks с
-  предупреждением в статусе.
+  `AnimationMixer` с crossfade 150–250 мс, скоростью 0.6–1.3x и возвратом в
+  нейтраль. `frontend/room-phrase.ts` кэширует файлы по URL (несколько жестов
+  из одного GLB не качаются повторно) и играет фразу целиком из анимаций;
+  смешанная фраза (анимации + дактиль landmarks) пока показывает только
+  landmarks с предупреждением в статусе.
 - **Документация:** `docs/ANIMATIONS.md` — как готовить анимации в Blender,
-  имя файла, загрузка через API, что реализовано, чек-лист при готовности
-  модели и точный шаг включения VRMA.
-- **Проверка:** `tests/test_animation_clips.py` (24), vitest
-  `animation-clip.test.ts` + `animation-player.test.ts` (7), полный
+  имена файлов/записей, загрузка через API, импорт файла с несколькими жестами,
+  что реализовано, чек-лист при готовности модели и точный шаг включения VRMA.
+- **Проверка:** `tests/test_animation_clips.py`, vitest
+  `animation-clip.test.ts` + `animation-player.test.ts`, полный
   `make check` зелёный.
 
 ## Дальше

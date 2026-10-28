@@ -1,8 +1,8 @@
 """Минимальный GLB-контейнер для тестов анимационных клипов (H1).
 
 Собирает валидный бинарный glTF из одного JSON-чанка. Бинарный (BIN) чанк не
-нужен: сервер читает только JSON (наличие анимаций и длительность по ``max``
-входного аксессора), а геометрию проверяет браузер.
+нужен: сервер читает только JSON (имена анимаций, наличие записей и длительность
+по ``max`` входных аксессоров), а геометрию проверяет браузер.
 """
 
 from __future__ import annotations
@@ -30,41 +30,49 @@ def animation_payload(
     duration_s: float = 1.5,
     vrma: bool = False,
     animations: int = 1,
+    names: list[str] | None = None,
+    durations: list[float] | None = None,
 ) -> dict:
-    """JSON-содержимое GLB с анимацией заданной длительности."""
+    """JSON-содержимое GLB с анимациями.
+
+    ``names``/``durations`` задают несколько записей с разными именами и
+    длительностью; ``animations`` — число записей с именами ``gesture_<i>``.
+    """
+    if names is None:
+        names = [f"gesture_{index}" for index in range(animations)]
+    if durations is None:
+        durations = [duration_s] * len(names)
+    if len(durations) != len(names):
+        raise ValueError("durations и names должны быть одной длины")
+
     payload: dict = {
         "asset": {"version": "2.0"},
         "accessors": [
-            {"bufferView": 0, "componentType": 5126, "count": 2, "type": "SCALAR"},
-            {"bufferView": 1, "componentType": 5126, "count": 2, "type": "VEC3"},
-        ],
-        "bufferViews": [
-            {"buffer": 0, "byteOffset": 0, "byteLength": 8},
-            {"buffer": 0, "byteOffset": 8, "byteLength": 24},
-        ],
-        "buffers": [{"byteLength": 32}],
-        "animations": [
             {
-                "name": f"gesture_{index}",
-                "samplers": [{"input": 0, "output": 1, "interpolation": "LINEAR"}],
+                "componentType": 5126,
+                "count": 2,
+                "type": "SCALAR",
+                "max": [duration],
+                "min": [0.0],
+            }
+            for duration in durations
+        ],
+        "buffers": [{"byteLength": 8 * max(1, len(names))}],
+    }
+    if names:
+        payload["animations"] = [
+            {
+                "name": name,
+                "samplers": [{"input": index, "output": 0, "interpolation": "LINEAR"}],
                 "channels": [],
             }
-            for index in range(animations)
-        ],
-    }
-    if animations == 0:
-        payload.pop("animations")
-        payload["accessors"] = payload["accessors"][:1]
-        payload["bufferViews"] = payload["bufferViews"][:1]
-        payload["buffers"] = [{"byteLength": 8}]
-    else:
-        payload["accessors"][0]["max"] = [duration_s]
-        payload["accessors"][0]["min"] = [0.0]
+            for index, name in enumerate(names)
+        ]
     if vrma:
         payload["extensionsUsed"] = ["VRMC_vrm_animation"]
     return payload
 
 
 def make_glb(**kwargs) -> bytes:
-    """Готовый GLB-файл анимации (по умолчанию — 1.5 с, обычный glTF)."""
+    """Готовый GLB-файл анимации (по умолчанию — 1.5 с, один жест)."""
     return glb_bytes(animation_payload(**kwargs))

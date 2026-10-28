@@ -111,6 +111,23 @@ export function animationCount(payload: Record<string, unknown>): number {
   return Array.isArray(payload.animations) ? payload.animations.length : 0;
 }
 
+/**
+ * Выбрать запись из файла по имени (`SignClip.animation_name`).
+ *
+ * Пустое имя — первая анимация (файл с одним жестом). Если имя задано, но
+ * такой записи нет, возвращается `null`: лучше показать субтитры, чем
+ * сыграть не тот жест. Имена совпадают с `animations[].name` в glTF.
+ */
+export function pickAnimationClip(
+  bundle: AnimationBundle,
+  name?: string | null,
+): AnimationClip | null {
+  if (bundle.clips.length === 0) return null;
+  const wanted = (name ?? "").trim();
+  if (!wanted) return bundle.clips[0];
+  return bundle.clips.find((clip) => clip.name === wanted) ?? null;
+}
+
 /** Загрузчик байтов (подменяется в тестах). */
 export type AnimationFetcher = (url: string) => Promise<ArrayBuffer>;
 

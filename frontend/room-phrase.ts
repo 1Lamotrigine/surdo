@@ -5,7 +5,7 @@
  */
 
 import { Avatar, type AvatarStatus } from "./avatar";
-import { loadAnimationBundle } from "./animation-clip";
+import { loadAnimationBundle, pickAnimationClip, type AnimationBundle } from "./animation-clip";
 import { AnimationPlayer, animationCrossfadeMs, type AnimationQueueItem } from "./animation-player";
 import { decodeClip } from "./clip";
 import { ClipPlayer } from "./clip-player";
@@ -61,6 +61,8 @@ export class RoomPhrasePlayer {
   private playbackPolicy: NormalizedPlaybackPolicy = DEFAULT_PLAYBACK_POLICY;
   private player: ClipPlayer | null = null;
   private animationPlayer: AnimationPlayer | null = null;
+  /** Кэш файлов анимаций: один GLB может содержать несколько жестов (H1). */
+  private animationBundles = new Map<string, Promise<AnimationBundle>>();
   private activeResolve: (() => void) | null = null;
   private disposed = false;
 
@@ -147,6 +149,7 @@ export class RoomPhrasePlayer {
     this.player = null;
     this.animationPlayer?.dispose();
     this.animationPlayer = null;
+    this.animationBundles.clear();
     this.avatar?.dispose();
   }
 
@@ -272,6 +275,17 @@ export class RoomPhrasePlayer {
     });
   }
 
+  /** Загрузить файл анимации один раз, даже если из него идут разные жесты. */
+  private loadAnimation(url: string): Promise<AnimationBundle> {
+    let pending = this.animationBundles.get(url);
+    if (!pending) {
+      pending = loadAnimationBundle(url);
+      this.animationBundles.set(url, pending);
+      pending.catch(() => this.animationBundles.delete(url));
+    }
+    return pending;
+  }
+
   /** Показать фразу из готовых анимаций (H1) через `AnimationMixer`. */
   private async playAnimations(
     vrm: NonNullable<Avatar["model"]>,
@@ -282,9 +296,14 @@ export class RoomPhrasePlayer {
     const items: (AnimationQueueItem | null)[] = await Promise.all(
       refs.map(async (ref) => {
         try {
-          const bundle = await loadAnimationBundle(ref.url);
-          const clip = bundle.clips[0];
-          if (!clip) return null;
+          const bundle = await this.loadAnimation(ref.url);
+          const clip = pickAnimationClip(bundle, ref.animation_name);
+          if (!clip) {
+            this.setStatus(
+              `Анимация «${ref.animation_name ?? ""}» не найдена в файле — субтитры.`,
+            );
+            return null;
+          }
           return {
             clip,
             wordIndex: wordIndexForToken(words, ref.token_index),

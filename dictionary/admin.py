@@ -31,6 +31,7 @@ class SignClipInline(admin.TabularInline):
     fields = (
         "version",
         "format",
+        "animation_name",
         "fps",
         "frames",
         "duration_ms",
@@ -41,6 +42,7 @@ class SignClipInline(admin.TabularInline):
     readonly_fields = (
         "version",
         "format",
+        "animation_name",
         "fps",
         "frames",
         "duration_ms",
@@ -164,6 +166,7 @@ class SignClipAdmin(admin.ModelAdmin):
         "id",
         "sign",
         "format",
+        "animation_name",
         "version",
         "fps",
         "frames",
@@ -178,6 +181,7 @@ class SignClipAdmin(admin.ModelAdmin):
         "sign",
         "file",
         "format",
+        "animation_name",
         "version",
         "fps",
         "frames",

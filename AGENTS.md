@@ -176,10 +176,15 @@ app/
   анимация (`SignClip.format`: `landmarks`/`animation`). Файлы `.vrma`/`.glb`
   принимает `POST /api/signs/` полем `animation` (одновременно с `clip` нельзя),
   проверяет `services/clips.py:parse_animation` (GLB-контейнер, версия 2,
-  JSON-чанк, наличие анимаций, `CLIP_MAX_ANIMATION_BYTES`), отдаёт
-  `/media/clips/<id>.<ext>` как `model/gltf-binary`. При выборе клипа анимация
-  важнее landmarks (`select_best_clip`, `Sign.best_clip`). На клиенте —
-  `frontend/animation-clip.ts` (загрузка GLB) и `frontend/animation-player.ts`
+  JSON-чанк, наличие анимаций, имена и длительности записей,
+  `CLIP_MAX_ANIMATION_BYTES`), отдаёт
+  `/media/clips/<id>.<ext>` как `model/gltf-binary`. Один файл может содержать
+  несколько жестов: запись выбирается по `SignClip.animation_name` (API-поле
+  `animation_clip`), а команда `import_animations` создаёт несколько жестов из
+  одного файла и хранит его один раз (`--map`/`--only`/`--dry-run`). При выборе
+  клипа анимация важнее landmarks (`select_best_clip`, `Sign.best_clip`). На
+  клиенте — `frontend/animation-clip.ts` (загрузка GLB, `pickAnimationClip`) и
+  `frontend/animation-player.ts`
   (`AnimationMixer`, crossfade); `room-phrase.ts` играет фразу целиком из
   анимаций. VRMA требует `@pixiv/three-vrm-animation` (пока не подключён,
   загрузчик даёт `VrmaNotSupportedError`); смешанные фразы (анимации + дактиль

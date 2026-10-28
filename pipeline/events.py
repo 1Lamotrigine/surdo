@@ -49,6 +49,7 @@ def _clip_payload(sign: Sign, clip) -> dict:
         "id": clip.pk,
         "gloss": sign.gloss,
         "format": clip.format,
+        "animation_name": clip.animation_name,
         "version": clip.version,
         "fps": clip.fps,
         "frames": clip.frames,

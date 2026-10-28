@@ -143,6 +143,16 @@ class SignClip(models.Model):
         choices=ClipFormat.choices,
         default=ClipFormat.LANDMARKS,
     )
+    animation_name = models.CharField(
+        "анимация в файле",
+        max_length=120,
+        blank=True,
+        default="",
+        help_text=(
+            "Имя записи внутри GLB/VRMA. Пусто — первая анимация файла. "
+            "Один файл может содержать несколько жестов (H1)."
+        ),
+    )
     fps = models.PositiveSmallIntegerField("кадров в секунду", default=30)
     duration_ms = models.PositiveIntegerField("длительность, мс", default=0)
     frames = models.PositiveIntegerField("кадров", default=0)

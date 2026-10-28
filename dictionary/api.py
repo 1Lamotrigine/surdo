@@ -79,6 +79,7 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
         clip = None
         animation = None
         animation_name = ""
+        animation_clip_name = ""
     else:
         gloss = request.POST.get("gloss", "")
         lang = request.POST.get("lang")
@@ -97,6 +98,7 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
         animation = None
         animation_name = ""
         animation_upload = request.FILES.get("animation")
+        animation_clip_name = request.POST.get("animation_clip", "")
         if animation_upload is not None:
             if animation_upload.size > settings.CLIP_MAX_ANIMATION_BYTES:
                 return JsonResponse(
@@ -138,6 +140,7 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
             clip=clip,
             animation=animation,
             animation_name=animation_name,
+            animation_clip=animation_clip_name,
             unknown_word=unknown_word,
         )
     except SignValidationError as exc:
