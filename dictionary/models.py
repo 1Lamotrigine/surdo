@@ -22,6 +22,19 @@ class SignStatus(models.TextChoices):
     REJECTED = "rejected", "Отклонён"
 
 
+class ClipFormat(models.TextChoices):
+    """Формат клипа: landmarks MediaPipe или готовая анимация.
+
+    ``landmarks`` — запись с камеры (``.json.gz``, ретаргет через Kalidokit),
+    ``animation`` — анимация, сделанная вручную (``.vrma``/``.glb``,
+    проигрывается через ``AnimationMixer``). Оба формата относятся к одной
+    глоссе и различаются только способом показа (``docs/ANIMATIONS.md``).
+    """
+
+    LANDMARKS = "landmarks", "Landmarks (MediaPipe)"
+    ANIMATION = "animation", "Анимация (VRMA/glTF)"
+
+
 class Sign(models.Model):
     """Жест словаря: глосса, язык, статус и история проверки.
 
@@ -85,8 +98,11 @@ class Sign(models.Model):
 
     @property
     def best_clip(self):
-        """Лучший клип жеста: последняя версия с наибольшим числом кадров."""
-        return self.clips.order_by("-version", "-frames").first()
+        """Лучший клип жеста: анимация важнее landmarks, затем версия и кадры."""
+        clips = list(self.clips.all())
+        if not clips:
+            return None
+        return max(clips, key=lambda clip: (clip.is_animation, clip.version, clip.frames))
 
     def verify(self, expert, comment: str = "") -> None:
         """Низкоуровнево пометить жест проверенным и зафиксировать проверяющего.
@@ -121,6 +137,12 @@ class SignClip(models.Model):
         verbose_name="жест",
     )
     file = models.FileField("файл", upload_to="clips/%Y/%m/")
+    format = models.CharField(
+        "формат",
+        max_length=12,
+        choices=ClipFormat.choices,
+        default=ClipFormat.LANDMARKS,
+    )
     fps = models.PositiveSmallIntegerField("кадров в секунду", default=30)
     duration_ms = models.PositiveIntegerField("длительность, мс", default=0)
     frames = models.PositiveIntegerField("кадров", default=0)
@@ -144,10 +166,29 @@ class SignClip(models.Model):
         """Относительный путь файла в хранилище клипов."""
         return self.file.name
 
+    @property
+    def is_animation(self) -> bool:
+        """Клип — готовая анимация, а не landmarks MediaPipe (H1)."""
+        return self.format == ClipFormat.ANIMATION
+
+    @property
+    def file_ext(self) -> str:
+        """Расширение файла клипа без точки (``json.gz``, ``vrma``, ``glb``)."""
+        name = self.file.name or ""
+        if name.endswith(".tar.gz"):
+            return "tar.gz"
+        return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
     def file_url(self) -> str:
-        """Публичный URL клипа (раздаёт веб-сервер)."""
+        """Публичный URL клипа (раздаёт веб-сервер).
+
+        Landmarks отдаются по историческому пути ``/media/clips/<id>.json.gz``,
+        анимации — с расширением файла, чтобы браузер и Caddy понимали тип.
+        """
         from django.urls import reverse
 
+        if self.is_animation and self.file_ext:
+            return reverse("clip-file-animation", args=[self.pk, self.file_ext])
         return reverse("clip-file", args=[self.pk])
 
 

@@ -30,6 +30,7 @@ class SignClipInline(admin.TabularInline):
     extra = 0
     fields = (
         "version",
+        "format",
         "fps",
         "frames",
         "duration_ms",
@@ -39,6 +40,7 @@ class SignClipInline(admin.TabularInline):
     )
     readonly_fields = (
         "version",
+        "format",
         "fps",
         "frames",
         "duration_ms",
@@ -158,14 +160,24 @@ class SignAdmin(admin.ModelAdmin):
 
 @admin.register(SignClip)
 class SignClipAdmin(admin.ModelAdmin):
-    list_display = ("id", "sign", "version", "fps", "frames", "duration_ms", "size_bytes")
-    list_filter = ("sign__lang", "sign__status", "fps")
+    list_display = (
+        "id",
+        "sign",
+        "format",
+        "version",
+        "fps",
+        "frames",
+        "duration_ms",
+        "size_bytes",
+    )
+    list_filter = ("format", "sign__lang", "sign__status", "fps")
     search_fields = ("sign__gloss",)
     list_select_related = ("sign",)
     readonly_fields = ("created_at", "clip_player")
     fields = (
         "sign",
         "file",
+        "format",
         "version",
         "fps",
         "frames",

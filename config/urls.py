@@ -29,5 +29,11 @@ urlpatterns = [
     path("api/signs/<int:sign_id>/review/", review_sign_api, name="api-sign-review"),
     # Совпадает с публичным URL клипа (в проде перехватывает Caddy).
     path("media/clips/<int:clip_id>.json.gz", clip_file, name="clip-file"),
+    # Анимационные клипы (H1): VRMA/glTF с расширением файла.
+    path(
+        "media/clips/<int:clip_id>.<str:ext>",
+        clip_file,
+        name="clip-file-animation",
+    ),
     path("admin/", admin.site.urls),
 ]

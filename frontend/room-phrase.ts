@@ -5,6 +5,8 @@
  */
 
 import { Avatar, type AvatarStatus } from "./avatar";
+import { loadAnimationBundle } from "./animation-clip";
+import { AnimationPlayer, animationCrossfadeMs, type AnimationQueueItem } from "./animation-player";
 import { decodeClip } from "./clip";
 import { ClipPlayer } from "./clip-player";
 import {
@@ -17,14 +19,17 @@ import {
 } from "./lag-policy";
 import {
   PhraseQueue,
+  clipRefsFromEvent,
   fetchClipBytes,
   loadClipQueue,
   type LoadedClip,
+  type UtteranceClipRef,
   type UtteranceEvent,
 } from "./room-clips";
 import {
   SubtitleView,
   alignTokens,
+  wordIndexForToken,
   type UtteranceGlosses,
 } from "./subtitles";
 
@@ -55,6 +60,7 @@ export class RoomPhrasePlayer {
   private readonly onDisplayStarted?: (utterance: UtteranceEvent) => void;
   private playbackPolicy: NormalizedPlaybackPolicy = DEFAULT_PLAYBACK_POLICY;
   private player: ClipPlayer | null = null;
+  private animationPlayer: AnimationPlayer | null = null;
   private activeResolve: (() => void) | null = null;
   private disposed = false;
 
@@ -123,6 +129,7 @@ export class RoomPhrasePlayer {
     const speed = effectivePlaybackSpeed(this.baseSpeed, normalized);
     this.player?.setSpeed(speed);
     this.player?.setGapMs(playbackGapMs(normalized));
+    this.animationPlayer?.setSpeed(speed);
   }
 
   /** Дождаться конца очереди (диагностика и тесты). */
@@ -138,6 +145,8 @@ export class RoomPhrasePlayer {
     this.activeResolve = null;
     this.player?.dispose();
     this.player = null;
+    this.animationPlayer?.dispose();
+    this.animationPlayer = null;
     this.avatar?.dispose();
   }
 
@@ -185,6 +194,28 @@ export class RoomPhrasePlayer {
     this.renderSubtitles(utterance);
     this.onDisplayStarted?.(utterance);
     this.setStatus(utterance.degraded ? "Фраза показана только субтитрами." : "Загрузка клипов…");
+
+    // H1: если вся фраза — готовые анимации, играем через AnimationMixer.
+    const refs = clipRefsFromEvent(utterance);
+    const animationRefs = refs.filter((ref) => ref.format === "animation");
+    if (animationRefs.length > 0) {
+      if (animationRefs.length !== refs.length) {
+        // Смешанная фраза (анимации + дактиль-landmarks) — шаблон H1.
+        this.setStatus("Смешанные клипы пока не поддерживаются: играем landmarks.");
+      } else {
+        await this.ready;
+        if (this.disposed) return;
+        const vrmForAnimation = this.avatar?.model ?? null;
+        if (!vrmForAnimation) {
+          await this.playAnimationSubtitlesOnly(utterance, animationRefs);
+          return;
+        }
+        this.setStatus("Показ фразы…");
+        await this.playAnimations(vrmForAnimation, utterance, animationRefs);
+        this.subtitles.highlight(-1);
+        return;
+      }
+    }
 
     const loadedPromise = loadClipQueue(utterance, {
       fetcher: fetchClipBytes,
@@ -239,6 +270,78 @@ export class RoomPhrasePlayer {
       this.subtitles.highlight(loaded[0]?.wordIndex ?? -1);
       player.start();
     });
+  }
+
+  /** Показать фразу из готовых анимаций (H1) через `AnimationMixer`. */
+  private async playAnimations(
+    vrm: NonNullable<Avatar["model"]>,
+    utterance: UtteranceEvent,
+    refs: UtteranceClipRef[],
+  ): Promise<void> {
+    const words = alignTokens(utterance.glosses);
+    const items: (AnimationQueueItem | null)[] = await Promise.all(
+      refs.map(async (ref) => {
+        try {
+          const bundle = await loadAnimationBundle(ref.url);
+          const clip = bundle.clips[0];
+          if (!clip) return null;
+          return {
+            clip,
+            wordIndex: wordIndexForToken(words, ref.token_index),
+          };
+        } catch {
+          this.setStatus("Часть анимаций недоступна — показываем субтитры.");
+          return null;
+        }
+      }),
+    );
+    const queue = items.filter((item): item is AnimationQueueItem => item !== null);
+    if (queue.length === 0) {
+      await this.playAnimationSubtitlesOnly(utterance, refs);
+      return;
+    }
+
+    const speed = effectivePlaybackSpeed(this.baseSpeed, this.playbackPolicy);
+    const shortestMs = Math.min(...queue.map((item) => item.clip.duration * 1000));
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = (): void => {
+        if (settled) return;
+        settled = true;
+        this.activeResolve = null;
+        this.animationPlayer?.dispose();
+        this.animationPlayer = null;
+        resolve();
+      };
+      this.activeResolve = done;
+
+      const player = new AnimationPlayer(vrm, {
+        speed,
+        crossfadeMs: animationCrossfadeMs(200, shortestMs),
+        onClip: (index) => this.subtitles.highlight(queue[index]?.wordIndex ?? -1),
+        onEnd: done,
+      });
+      this.animationPlayer = player;
+      player.loadQueue(queue);
+      this.subtitles.highlight(queue[0]?.wordIndex ?? -1);
+      player.start();
+    });
+  }
+
+  /** Без VRM подсвечиваем слова по длительности анимаций. */
+  private async playAnimationSubtitlesOnly(
+    utterance: UtteranceEvent,
+    refs: UtteranceClipRef[],
+  ): Promise<void> {
+    const words = alignTokens(utterance.glosses);
+    const speed = effectivePlaybackSpeed(this.baseSpeed, this.playbackPolicy);
+    for (const ref of refs) {
+      if (this.disposed) return;
+      this.subtitles.highlight(wordIndexForToken(words, ref.token_index));
+      const duration = ref.duration_ms && ref.duration_ms > 0 ? ref.duration_ms : 1000;
+      await delay(Math.max(200, duration / speed));
+    }
+    this.subtitles.highlight(-1);
   }
 
   /** Без VRM или клипов подсвечиваем слова по длительности клипов. */

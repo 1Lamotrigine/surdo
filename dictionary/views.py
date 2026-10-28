@@ -33,6 +33,12 @@ from services.clips import default_storage
 # Клипы неизменяемы (новая версия — новый файл), поэтому кэш надолго.
 CLIP_CACHE_CONTROL = "public, max-age=604800, immutable"
 CLIP_CONTENT_TYPE = "application/gzip"
+# Анимационные клипы (H1): VRMA — это тоже GLB-контейнер.
+ANIMATION_CONTENT_TYPES = {
+    "vrma": "model/gltf-binary",
+    "glb": "model/gltf-binary",
+}
+DEFAULT_ANIMATION_CONTENT_TYPE = "application/octet-stream"
 
 
 def _mediapipe_wasm_path() -> str:
@@ -54,7 +60,7 @@ def _get_clip(clip_id: int) -> SignClip | None:
     return SignClip.objects.filter(pk=clip_id).first()
 
 
-def _clip_etag(request: HttpRequest, clip_id: int) -> str | None:
+def _clip_etag(request: HttpRequest, clip_id: int, ext: str | None = None, **kwargs) -> str | None:
     clip = _get_clip(clip_id)
     if clip is None or not clip.file:
         return None
@@ -66,11 +72,12 @@ def _clip_etag(request: HttpRequest, clip_id: int) -> str | None:
 
 
 @condition(etag_func=_clip_etag)
-def clip_file(request: HttpRequest, clip_id: int) -> FileResponse:
+def clip_file(request: HttpRequest, clip_id: int, ext: str | None = None) -> FileResponse:
     """Отдать файл клипа с ETag и кэш-заголовками (повтор — 304).
 
     В проде запросы к ``/media/clips/<id>.json.gz`` перехватывает Caddy; эта вью
-    используется, когда клипы отдаёт Django (DEBUG, тесты).
+    используется, когда клипы отдаёт Django (DEBUG, тесты). Для анимаций (H1)
+    тип ответа зависит от расширения: ``.vrma``/``.glb`` — ``model/gltf-binary``.
     """
     clip = _get_clip(clip_id)
     if clip is None or not clip.file:
@@ -81,7 +88,13 @@ def clip_file(request: HttpRequest, clip_id: int) -> FileResponse:
     except FileNotFoundError as exc:
         raise Http404("Файл клипа отсутствует") from exc
 
-    response = FileResponse(file, content_type=CLIP_CONTENT_TYPE)
+    if clip.is_animation:
+        content_type = ANIMATION_CONTENT_TYPES.get(
+            (ext or clip.file_ext).lower(), DEFAULT_ANIMATION_CONTENT_TYPE
+        )
+    else:
+        content_type = CLIP_CONTENT_TYPE
+    response = FileResponse(file, content_type=content_type)
     response["Cache-Control"] = CLIP_CACHE_CONTROL
     return response
 

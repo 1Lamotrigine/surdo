@@ -51,7 +51,9 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
     """Создать жест редактором: метаданные и файл клипа (ТЗ 7.4).
 
     Принимает ``multipart/form-data`` (поля ``gloss``, ``lang``, ``description``,
-    файл ``clip``, необязательный ``unknown_word``) или ``application/json``.
+    файл ``clip`` или файл ``animation``, необязательный ``unknown_word``) или
+    ``application/json``. ``clip`` — запись с камеры (``.json.gz``, landmarks),
+    ``animation`` — готовая анимация (``.vrma``/``.glb``); оба сразу нельзя.
     Если передан ``unknown_word``, слово очереди должно быть в статусе
     ``queued`` и после успешного создания жеста становится ``recorded`` (D4).
     """
@@ -75,6 +77,8 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
         description = payload.get("description", "")
         source = payload
         clip = None
+        animation = None
+        animation_name = ""
     else:
         gloss = request.POST.get("gloss", "")
         lang = request.POST.get("lang")
@@ -89,6 +93,29 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
                     status=413,
                 )
             clip = upload.read()
+
+        animation = None
+        animation_name = ""
+        animation_upload = request.FILES.get("animation")
+        if animation_upload is not None:
+            if animation_upload.size > settings.CLIP_MAX_ANIMATION_BYTES:
+                return JsonResponse(
+                    {
+                        "detail": (
+                            "Файл анимации больше "
+                            f"{settings.CLIP_MAX_ANIMATION_BYTES} байт."
+                        )
+                    },
+                    status=413,
+                )
+            animation = animation_upload.read()
+            animation_name = animation_upload.name or ""
+
+    if clip is not None and animation is not None:
+        return JsonResponse(
+            {"detail": "Передайте либо клип landmarks, либо анимацию, но не оба."},
+            status=400,
+        )
 
     unknown_word = None
     raw_unknown_word = source.get("unknown_word")
@@ -109,6 +136,8 @@ def create_sign_api(request: HttpRequest) -> JsonResponse:
             lang=lang,
             description=description,
             clip=clip,
+            animation=animation,
+            animation_name=animation_name,
             unknown_word=unknown_word,
         )
     except SignValidationError as exc:

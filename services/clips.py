@@ -109,6 +109,162 @@ class ClipFormatError(ValueError):
     """Файл клипа не соответствует формату ``docs/spec/clip-format.md``."""
 
 
+# --- Анимационные клипы (H1): VRMA/glTF вместо landmarks -------------------
+#
+# Второй формат клипа — готовая анимация, сделанная вручную (Blender и т. п.).
+# Файл — бинарный glTF (GLB), в котором лежит одна или несколько анимаций.
+# VRMA (``.vrma``) — частный случай GLB с расширением ``VRMC_vrm_animation``:
+# та же структура контейнера, но дорожки адресуют гуманоидные кости VRM, а не
+# узлы конкретной модели. Сервер формат не проигрывает — он только проверяет
+# контейнер и сохраняет метаданные (см. ``docs/ANIMATIONS.md``).
+
+GLB_MAGIC = b"glTF"
+GLB_VERSION = 2
+_GLB_HEADER_SIZE = 12
+_GLB_CHUNK_HEADER_SIZE = 8
+_GLB_JSON_CHUNK = 0x4E4F534A  # 'JSON'
+VRMA_EXTENSION = "VRMC_vrm_animation"
+ANIMATION_EXTENSIONS = (".vrma", ".glb")
+
+
+@dataclass(frozen=True)
+class AnimationMeta:
+    """Метаданные анимационного клипа, прочитанные из GLB-контейнера."""
+
+    extension: str
+    vrma: bool
+    animations: int
+    duration_ms: int
+    size_bytes: int
+
+    @property
+    def format(self) -> str:
+        return "animation"
+
+
+def glb_json(blob: bytes) -> dict:
+    """Достать JSON-чанк из GLB-контейнера (без разбора бинарных данных).
+
+    Проверяет сигнатуру ``glTF``, версию 2 и целостность первого чанка. Этого
+    достаточно, чтобы отсечь не-GLB файлы и битые загрузки; геометрию и
+    анимации сервер не валидирует — это делает браузер при проигрывании.
+    """
+    if len(blob) < _GLB_HEADER_SIZE:
+        raise ClipFormatError("Файл анимации короче заголовка GLB.")
+    magic, version, length = (
+        blob[0:4],
+        int.from_bytes(blob[4:8], "little"),
+        int.from_bytes(blob[8:12], "little"),
+    )
+    if magic != GLB_MAGIC:
+        raise ClipFormatError("Файл анимации не является GLB (нет сигнатуры glTF).")
+    if version != GLB_VERSION:
+        raise ClipFormatError(f"Версия GLB {version} не поддерживается (ожидается 2).")
+    if length != len(blob):
+        raise ClipFormatError(
+            f"Длина GLB в заголовке ({length}) не совпадает с размером файла ({len(blob)})."
+        )
+
+    offset = _GLB_HEADER_SIZE
+    if offset + _GLB_CHUNK_HEADER_SIZE > len(blob):
+        raise ClipFormatError("В GLB нет JSON-чанка.")
+    chunk_length = int.from_bytes(blob[offset : offset + 4], "little")
+    chunk_type = int.from_bytes(blob[offset + 4 : offset + 8], "little")
+    if chunk_type != _GLB_JSON_CHUNK:
+        raise ClipFormatError("Первый чанк GLB должен быть JSON.")
+    start = offset + _GLB_CHUNK_HEADER_SIZE
+    end = start + chunk_length
+    if end > len(blob):
+        raise ClipFormatError("JSON-чанк GLB выходит за границы файла.")
+    try:
+        payload = json.loads(blob[start:end].decode("utf-8").rstrip("\x00 "))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ClipFormatError("JSON-чанк GLB не разбирается.") from exc
+    if not isinstance(payload, dict):
+        raise ClipFormatError("JSON-чанк GLB должен быть объектом.")
+    return payload
+
+
+def _gltf_duration_ms(payload: dict) -> int:
+    """Длительность самой длинной анимации по ``max`` входных аксессоров.
+
+    В glTF у ``accessor`` для времени часто есть ``max``; если его нет,
+    длительность неизвестна и остаётся 0 (клиент возьмёт её из файла).
+    """
+    accessors = payload.get("accessors")
+    if not isinstance(accessors, list):
+        return 0
+    longest = 0.0
+    animations = payload.get("animations")
+    if not isinstance(animations, list):
+        return 0
+    for animation in animations:
+        if not isinstance(animation, dict):
+            continue
+        samplers = animation.get("samplers")
+        if not isinstance(samplers, list):
+            continue
+        for sampler in samplers:
+            if not isinstance(sampler, dict):
+                continue
+            index = sampler.get("input")
+            if not isinstance(index, int) or not 0 <= index < len(accessors):
+                continue
+            accessor = accessors[index]
+            if not isinstance(accessor, dict):
+                continue
+            maximum = accessor.get("max")
+            if isinstance(maximum, list) and maximum and isinstance(maximum[0], (int, float)):
+                longest = max(longest, float(maximum[0]))
+    return round(longest * 1000)
+
+
+def parse_animation(
+    blob: bytes,
+    *,
+    filename: str = "",
+    max_bytes: int | None = None,
+) -> AnimationMeta:
+    """Проверить анимационный клип (GLB/VRMA) и вернуть метаданные.
+
+    Проверяются: непустой файл, лимит размера, сигнатура и версия GLB, JSON-чанк
+    и наличие хотя бы одной анимации. Расширение берётся из имени файла
+    (``.vrma``/``.glb``); без имени — по расширению ``VRMC_vrm_animation``.
+    """
+    limit = settings.CLIP_MAX_ANIMATION_BYTES if max_bytes is None else max_bytes
+    if not blob:
+        raise ClipFormatError("Пустой файл анимации.")
+    if len(blob) > limit:
+        raise ClipFormatError(f"Анимация больше лимита: {len(blob)} байт (максимум {limit}).")
+
+    suffix = Path(filename).suffix.lower() if filename else ""
+    if suffix and suffix not in ANIMATION_EXTENSIONS:
+        raise ClipFormatError(
+            f"Расширение {suffix!r} не поддерживается: нужен .vrma или .glb."
+        )
+
+    payload = glb_json(blob)
+    extensions = payload.get("extensionsUsed")
+    used = extensions if isinstance(extensions, list) else []
+    vrma = VRMA_EXTENSION in used or suffix == ".vrma"
+
+    animations = payload.get("animations")
+    count = len(animations) if isinstance(animations, list) else 0
+    if count == 0:
+        raise ClipFormatError("В файле анимации нет ни одной анимации.")
+
+    if not suffix:
+        suffix = ".vrma" if vrma else ".glb"
+
+    return AnimationMeta(
+        extension=suffix.lstrip("."),
+        vrma=vrma,
+        animations=count,
+        duration_ms=_gltf_duration_ms(payload),
+        size_bytes=len(blob),
+    )
+
+
 @dataclass(frozen=True)
 class ClipMeta:
     """Метаданные клипа, прочитанные из файла ``.json.gz``."""

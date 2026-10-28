@@ -48,12 +48,32 @@ def _clip_payload(sign: Sign, clip) -> dict:
     return {
         "id": clip.pk,
         "gloss": sign.gloss,
+        "format": clip.format,
         "version": clip.version,
         "fps": clip.fps,
         "frames": clip.frames,
         "duration_ms": clip.duration_ms,
         "url": clip.file_url(),
     }
+
+
+def select_best_clip(clips: list) -> object | None:
+    """Лучший клип жеста: анимация важнее landmarks, затем версия и кадры.
+
+    Если у жеста есть и запись с камеры, и ручная анимация (H1), показываем
+    анимацию — она сделана специально для модели. Иначе поведение прежнее:
+    последняя версия, затем больше кадров.
+    """
+    if not clips:
+        return None
+    return max(
+        clips,
+        key=lambda clip: (
+            clip.is_animation,
+            clip.version,
+            clip.frames,
+        ),
+    )
 
 
 def _iter_gloss_slots(glosses: dict):
@@ -104,7 +124,9 @@ def clip_refs_for_glosses(glosses: dict) -> list[dict]:
         clips = list(sign.clips.all())
         if not clips:
             continue
-        best = max(clips, key=lambda clip: (clip.version, clip.frames))
+        best = select_best_clip(clips)
+        if best is None:
+            continue
         best_by_gloss.setdefault(sign.gloss.upper(), (sign, best))
 
     refs: list[dict] = []

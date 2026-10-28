@@ -171,6 +171,19 @@ app/
   микрофон и не блокирует текстовую форму FR-7. `pagehide` и `room_closed`
   останавливают запись. Первый запуск скачивает модель Silero VAD; нужен
   HTTPS/localhost. Vite сам собирает worker и wasm-ассет `vad-web`.
+- Анимационные жесты (H1): второй формат клипа рядом с landmarks — готовая
+  анимация (`SignClip.format`: `landmarks`/`animation`). Файлы `.vrma`/`.glb`
+  принимает `POST /api/signs/` полем `animation` (одновременно с `clip` нельзя),
+  проверяет `services/clips.py:parse_animation` (GLB-контейнер, версия 2,
+  JSON-чанк, наличие анимаций, `CLIP_MAX_ANIMATION_BYTES`), отдаёт
+  `/media/clips/<id>.<ext>` как `model/gltf-binary`. При выборе клипа анимация
+  важнее landmarks (`select_best_clip`, `Sign.best_clip`). На клиенте —
+  `frontend/animation-clip.ts` (загрузка GLB) и `frontend/animation-player.ts`
+  (`AnimationMixer`, crossfade); `room-phrase.ts` играет фразу целиком из
+  анимаций. VRMA требует `@pixiv/three-vrm-animation` (пока не подключён,
+  загрузчик даёт `VrmaNotSupportedError`); смешанные фразы (анимации + дактиль
+  landmarks) пока падают в landmarks с предупреждением. Полный гайд и чек-лист —
+  `docs/ANIMATIONS.md`.
 - Живые фразы (E3): `pipeline/events.py` рассылает в группу `room_<id>`
   `asr_text` (сразу распознанный текст) и `utterance` (глоссы E1 + клипы
   проверенных жестов/чисел/дактиля в порядке показа). Фоновый поток очереди

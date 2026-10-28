@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from dictionary.models import (
+    ClipFormat,
     DictionaryVersion,
     Language,
     Sign,
@@ -23,7 +25,14 @@ from dictionary.statuses import (
     allowed_targets,
     validate_transition,
 )
-from services.clips import ClipFormatError, ClipMeta, default_storage, parse_clip
+from services.clips import (
+    AnimationMeta,
+    ClipFormatError,
+    ClipMeta,
+    default_storage,
+    parse_animation,
+    parse_clip,
+)
 
 # Глоссы, которые отдаём в публичном списке по умолчанию.
 PUBLIC_STATUS = SignStatus.VERIFIED
@@ -68,6 +77,7 @@ def sign_payload(sign: Sign, *, include_unverified_clip: bool = False) -> dict:
         "clips": [
             {
                 "id": clip.pk,
+                "format": clip.format,
                 "version": clip.version,
                 "fps": clip.fps,
                 "frames": clip.frames,
@@ -125,6 +135,8 @@ def create_sign(
     lang: str | None = None,
     description: str = "",
     clip: bytes | None = None,
+    animation: bytes | None = None,
+    animation_name: str = "",
     status: str = SignStatus.DRAFT,
     unknown_word: UnknownWord | None = None,
 ) -> Sign:
@@ -132,6 +144,11 @@ def create_sign(
 
     Клип сохраняется в хранилище (``services.clips``) и его путь и метаданные
     записываются в ``SignClip``. Формат клипа проверяется до записи на диск.
+
+    Клип бывает двух форматов (H1): ``clip`` — запись с камеры (``.json.gz``,
+    landmarks MediaPipe) или ``animation`` — готовая анимация (``.vrma``/``.glb``,
+    ``animation_name`` задаёт имя файла и расширение). Передавать оба сразу
+    нельзя.
 
     Если передан ``unknown_word`` (D4), слово должно быть взято в работу
     (``queued``): в той же транзакции оно становится ``recorded``. Так слово
@@ -141,15 +158,23 @@ def create_sign(
     lang = _clean_lang(lang)
     if status not in SignStatus.values:
         raise SignValidationError(f"Неизвестный статус: {status}.")
+    if clip is not None and animation is not None:
+        raise SignValidationError("Передайте либо клип landmarks, либо анимацию, но не оба.")
     if unknown_word is not None and unknown_word.status != UnknownWordStatus.QUEUED:
         raise SignValidationError(
             f"Слово «{unknown_word.lemma}» нужно сначала взять в работу."
         )
 
     meta: ClipMeta | None = None
+    animation_meta: AnimationMeta | None = None
     if clip is not None:
         try:
             meta = parse_clip(clip)
+        except ClipFormatError as exc:
+            raise SignValidationError(str(exc)) from exc
+    if animation is not None:
+        try:
+            animation_meta = parse_animation(animation, filename=animation_name)
         except ClipFormatError as exc:
             raise SignValidationError(str(exc)) from exc
 
@@ -163,6 +188,8 @@ def create_sign(
         )
         if clip is not None and meta is not None:
             _attach_clip(sign, clip, meta)
+        if animation is not None and animation_meta is not None:
+            _attach_animation(sign, animation, animation_meta)
         if unknown_word is not None:
             try:
                 mark_unknown_word_recorded(unknown_word)
@@ -254,7 +281,7 @@ def reject_sign(sign: Sign, *, actor, comment: str = "") -> Sign:
 
 
 def _attach_clip(sign: Sign, blob: bytes, meta: ClipMeta) -> SignClip:
-    """Сохранить файл клипа в хранилище и создать запись ``SignClip``."""
+    """Сохранить файл клипа landmarks в хранилище и создать запись ``SignClip``."""
     name = _clip_filename(sign, meta)
     stamp = timezone.now().strftime("%Y/%m")
     path = f"clips/{stamp}/{name}"
@@ -262,9 +289,34 @@ def _attach_clip(sign: Sign, blob: bytes, meta: ClipMeta) -> SignClip:
     return SignClip.objects.create(
         sign=sign,
         file=path,
+        format=ClipFormat.LANDMARKS,
         fps=meta.fps,
         duration_ms=meta.duration_ms,
         frames=meta.frames,
+        version=sign.clips.count() + 1,
+        size_bytes=len(blob),
+    )
+
+
+def _attach_animation(sign: Sign, blob: bytes, meta: AnimationMeta) -> SignClip:
+    """Сохранить анимационный клип (VRMA/glTF) и создать запись ``SignClip``.
+
+    У анимации нет кадров landmarks и фиксированного FPS: длительность берётся
+    из glTF (если её удалось прочитать), а ``frames`` остаётся 0. Показ идёт
+    через ``AnimationMixer``, который сам считает время по дорожкам.
+    """
+    slug = _ascii_slug(sign.gloss) or "sign"
+    name = f"{sign.pk}-{slug}-v{sign.clips.count() + 1}.{meta.extension}"
+    stamp = timezone.now().strftime("%Y/%m")
+    path = f"clips/{stamp}/{name}"
+    default_storage.save(path, blob)
+    return SignClip.objects.create(
+        sign=sign,
+        file=path,
+        format=ClipFormat.ANIMATION,
+        fps=settings.ANIMATION_DEFAULT_FPS,
+        duration_ms=meta.duration_ms,
+        frames=0,
         version=sign.clips.count() + 1,
         size_bytes=len(blob),
     )

@@ -155,6 +155,12 @@ CLIP_VERSION = int(os.environ.get("CLIP_VERSION", "1"))
 CLIP_MAX_SIZE_BYTES = int(os.environ.get("CLIP_MAX_SIZE_BYTES", str(2 * 1024 * 1024)))
 CLIP_MAX_FRAMES = int(os.environ.get("CLIP_MAX_FRAMES", "300"))
 CLIP_DEFAULT_FPS = int(os.environ.get("CLIP_DEFAULT_FPS", "30"))
+# Анимационные клипы (H1): готовая анимация VRMA/glTF вместо landmarks.
+CLIP_MAX_ANIMATION_BYTES = int(
+    os.environ.get("CLIP_MAX_ANIMATION_BYTES", str(20 * 1024 * 1024))
+)
+# У анимационных клипов нет кадров: FPS хранится для единообразия и UI.
+ANIMATION_DEFAULT_FPS = int(os.environ.get("ANIMATION_DEFAULT_FPS", "30"))
 
 DATABASES = {
     "default": dj_database_url.parse(

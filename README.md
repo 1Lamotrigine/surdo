@@ -129,6 +129,10 @@ docker compose exec web python manage.py seed_admin
 
 Пошаговая инструкция для редактора и эксперта — `docs/DICTIONARY.md`.
 
+Жест можно не только записать с камеры, но и сделать готовой анимацией
+(`.vrma`/`.glb`, например в Blender) и загрузить тем же API. Как готовить,
+загружать и что ещё осталось подключить — `docs/ANIMATIONS.md`.
+
 ## PWA и установка на телефон
 
 Сайт работает как PWA: он отдаёт веб-манифест с корня (`/manifest.webmanifest`),
@@ -238,5 +242,6 @@ make logs             # логи web
 - Выжимки из ТЗ по разделам: `docs/spec/`
 - Развёртывание на сервере: `docs/DEPLOY.md`
 - Инструкция редактору словаря: `docs/DICTIONARY.md`
+- Анимационные жесты (VRMA/glTF): `docs/ANIMATIONS.md`
 - Правила для агента: `AGENTS.md`
 - Состояние и план этапов: `docs/STATE.md`

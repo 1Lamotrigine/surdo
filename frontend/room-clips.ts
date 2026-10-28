@@ -14,12 +14,16 @@ import { alignTokens, wordIndexForToken, type UtteranceGlosses } from "./subtitl
 /** Вид клипа: жест, число или буква дактиля. */
 export type ClipKind = "sign" | "number" | "fingerspell";
 
+/** Формат файла клипа: landmarks MediaPipe или готовая анимация (H1). */
+export type ClipFormat = "landmarks" | "animation";
+
 /** Ссылка на клип в событии `utterance` (порядок уже совпадает с показом). */
 export type UtteranceClipRef = {
   token_index: number;
   kind: ClipKind;
   gloss: string;
   url: string;
+  format?: ClipFormat;
   fps?: number;
   frames?: number;
   duration_ms?: number;
@@ -69,6 +73,7 @@ export function clipRefsFromEvent(utterance: UtteranceEvent): UtteranceClipRef[]
     ...ref,
     kind: ref.kind === "number" || ref.kind === "fingerspell" ? ref.kind : "sign",
     gloss: typeof ref.gloss === "string" ? ref.gloss : "",
+    format: ref.format === "animation" ? "animation" : "landmarks",
   }));
 }
 

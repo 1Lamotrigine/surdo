@@ -1,11 +1,17 @@
 # Состояние проекта
 
-Обновлено: 2026-10-27
+Обновлено: 2026-10-28
 
 ## Текущий этап
 
-**G5 — README, схема архитектуры и инструкция редактору словаря: готов.
-Это последний этап плана блоков A–G.**
+**H1 — каркас анимационных жестов (VRMA/glTF): готов.
+Этап вне плана A–G, добавлен после G5 по запросу человека.**
+
+Проект по-прежнему функционально завершён по ТЗ (блоки A–G). H1 нужен для
+второго способа производства жестов: команда делает анимации вручную в Blender
+на готовой модели с правильным скелетом. Сервер уже принимает и хранит такие
+клипы, клиент умеет их грузить и проигрывать; осталось подключить саму модель и
+(при желании) пакет VRMA — см. `docs/ANIMATIONS.md`.
 
 Предыдущие этапы: **G4 — прод-конфигурация, G3 — скрипт нагрузки,
 G2 — предложение установки PWA, G1 — PWA: манифест, иконки и service worker,
@@ -23,7 +29,8 @@ E5 — панель преподавателя: готовы.**
   `DJANGO_VITE_DEV_MODE`, `DJANGO_VITE_DEV_SERVER_HOST`, `DJANGO_VITE_DEV_SERVER_PORT`,
   `ROOM_PING_INTERVAL`, `ROOM_PING_TIMEOUT`, `AVATAR_MODEL_URL`,
   `MEDIAPIPE_HOLISTIC_MODEL_URL`, `CLIP_VERSION`, `CLIP_DEFAULT_FPS`,
-  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`,
+  `CLIP_MAX_FRAMES`, `CLIP_MAX_SIZE_BYTES`, `CLIP_MAX_ANIMATION_BYTES`,
+  `ANIMATION_DEFAULT_FPS`, `ASR_MAX_CONCURRENCY`, `ROOM_QUEUE_MAX`,
   `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_URL`, `LLM_TIMEOUT`,
   `COMPRESS_TIMEOUT`, `WHISPER_MODEL`, `WHISPER_DEVICE`, `ASR_TIMEOUT`.
 - PostgreSQL как единственная база (SQLite не используется), доступ через
@@ -2191,6 +2198,37 @@ production-сборка Vite. Сборка выпускает `vad-web-worker-*.
   кэше PWA. Основа — ТЗ раздел 9.
 - **Проверка:** `make check` зелёный (изменения только в документации: код и тесты
   не затронуты).
+
+## H1: анимационные жесты (VRMA/glTF)
+
+- **Модель:** `dictionary.ClipFormat` (`landmarks`/`animation`) и
+  `SignClip.format` (миграция `0002_signclip_format`). У клипа появились
+  `is_animation`, `file_ext`, `file_url()` с расширением; `best_clip` и
+  `pipeline.events.select_best_clip` предпочитают анимацию landmarks.
+- **Приём и хранение:** `services/clips.py:parse_animation` проверяет GLB
+  (сигнатура, версия 2, длина, JSON-чанк, наличие анимаций, лимит
+  `CLIP_MAX_ANIMATION_BYTES` = 20 МиБ) и достаёт длительность из `max`
+  входных аксессоров. `create_sign(animation=…, animation_name=…)` сохраняет
+  файл `.vrma`/`.glb` и запись `SignClip(format=animation, frames=0,
+  duration_ms, fps=ANIMATION_DEFAULT_FPS)`. Оба файла одновременно — `400`.
+- **API и отдача:** `POST /api/signs/` принимает multipart-поле `animation`
+  (`413` на превышение); `format` есть в `sign_payload` и в ссылках на клипы
+  события `utterance`. Файл отдаётся по `/media/clips/<id>.<ext>` с
+  `model/gltf-binary`, ETag и `immutable`-кэшем.
+- **Клиент:** `frontend/animation-clip.ts` разбирает GLB и отдаёт
+  `AnimationBundle`; VRMA распознаётся и даёт `VrmaNotSupportedError` (пакет
+  `@pixiv/three-vrm-animation` не подключён — новые зависимости только по
+  просьбе). `frontend/animation-player.ts` играет очередь через
+  `AnimationMixer` с crossfade 150–250 мс, скоростью 0.6–1.3x и завершением.
+  `frontend/room-phrase.ts` играет фразу целиком из анимаций; смешанная фраза
+  (анимации + дактиль landmarks) пока показывает только landmarks с
+  предупреждением в статусе.
+- **Документация:** `docs/ANIMATIONS.md` — как готовить анимации в Blender,
+  имя файла, загрузка через API, что реализовано, чек-лист при готовности
+  модели и точный шаг включения VRMA.
+- **Проверка:** `tests/test_animation_clips.py` (24), vitest
+  `animation-clip.test.ts` + `animation-player.test.ts` (7), полный
+  `make check` зелёный.
 
 ## Дальше
 
