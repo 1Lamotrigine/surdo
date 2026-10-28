@@ -6,6 +6,11 @@ __pycache__/
 media/
 staticfiles/
 static/dist/
+# Исходники модели/анимаций (бинарные, не коммитим; см. assets/README.md).
+assets/**/*.vrm
+assets/**/*.vrma
+assets/**/*.glb
+assets/**/*.blend
 .pytest_cache/
 .ruff_cache/
 .coverage

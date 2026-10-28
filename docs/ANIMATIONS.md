@@ -26,6 +26,30 @@
 Если у жеста есть и запись, и анимация, показ выбирает **анимацию**
 (`pipeline/events.py: select_best_clip`, `Sign.best_clip`).
 
+## Куда класть файлы
+
+Исходники (не коммитятся) — в `assets/`:
+
+```
+app/assets/model/        # модель: avatar.vrm (любое имя)
+app/assets/animations/   # жесты: uchebnik.glb, daktil_a.vrma, cifra_5.glb …
+```
+
+Один жест — один файл, имя = транслит глоссы. Затем файлы попадают в `media/`
+и в словарь:
+
+- **Анимации** — загрузкой через API (см. «Загрузка в словарь»); файл из
+  `assets/animations/` передаётся полем `animation`.
+- **Модель** — скопировать в медиа-том и указать URL:
+  ```bash
+  docker compose cp assets/model/avatar.vrm web:/app/media/avatar/avatar.vrm
+  # в .env: AVATAR_MODEL_URL=/media/avatar/avatar.vrm
+  docker compose up -d web
+  ```
+  При запуске без Docker достаточно положить файл в `app/media/avatar/` и
+  открыть `/avatar/` с тем же URL (при `DEBUG=True` Django раздаёт `media/`).
+  В проде `/media/*` раздаёт Caddy из тома.
+
 ## Как подготовить анимации
 
 1. Один жест — **один файл с одной анимацией**. Несколько жестов в одном `.glb`

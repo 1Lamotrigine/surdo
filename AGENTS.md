@@ -43,6 +43,7 @@ app/
 ├── dictionary/      # жесты, клипы, версии словаря, ревью (блок B)
 ├── pipeline/        # приём фразы, Utterance, метрики (блок E)
 ├── services/        # pure-Python: asr, gloss, compress (блок F)
+├── assets/          # исходники модели и анимаций (бинарь, не коммитится)
 ├── frontend/        # JS/TS-модули; точка входа main.ts
 ├── templates/       # Django-шаблоны + HTMX
 ├── static/          # статика проекта; static/dist — сборка Vite (не коммитится)
