@@ -42,6 +42,22 @@
       </p>
     </div>
 
+    {# C8: лента расшифровки — прочитать пропущенное, если не успел за жестами. #}
+    <section class="student-transcript-section" aria-labelledby="transcript-title">
+      <h2 id="transcript-title">Расшифровка речи</h2>
+      <p class="student-transcript-hint">
+        Текст фраз по порядку. Свежие снизу — прокрутите, чтобы перечитать.
+      </p>
+      <div
+        class="student-transcript"
+        data-room-transcript
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        tabindex="0"
+      ></div>
+    </section>
+
     {% if room.demo_mode %}
       <aside class="notice notice-warning">
         Демо-режим: часть жестов ещё не проверена носителем.

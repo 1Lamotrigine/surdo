@@ -19,6 +19,7 @@ import {
 } from "./notifications";
 import type { UtteranceEvent } from "./room-clips";
 import type { PlaybackPolicy } from "./lag-policy";
+import { TranscriptView } from "./transcript";
 
 type PresenceEntry = {
   name: string;
@@ -95,6 +96,8 @@ export function setupRoomLive(root: HTMLElement): void {
   const isStudentView = root.hasAttribute("data-student-view");
   const wakeLockStatus = root.querySelector<HTMLElement>("[data-wake-lock-status]");
   const liveCaption = root.querySelector<HTMLElement>("[data-room-live-caption]");
+  const transcriptRoot = root.querySelector<HTMLElement>("[data-room-transcript]");
+  const transcript = transcriptRoot ? new TranscriptView(transcriptRoot) : null;
   const lagPanel = root.querySelector<HTMLElement>("[data-lag-panel]");
   const lagValue = root.querySelector<HTMLElement>("[data-lag-value]");
   const lagHint = root.querySelector<HTMLElement>("[data-lag-hint]");
@@ -364,6 +367,8 @@ export function setupRoomLive(root: HTMLElement): void {
         .sort((left, right) => left.seq - right.seq);
       for (const utterance of missed) {
         lastSeq = utterance.seq;
+        // C8: пропущенные фразы догружаем и в ленту, чтобы можно было прочитать.
+        transcript?.push({ seq: utterance.seq, text: utterance.text });
         getPhrasePlayer()
           ?.then((player) => {
             player.enqueue(utterance);
@@ -413,10 +418,14 @@ export function setupRoomLive(root: HTMLElement): void {
         );
       } else if (isEvent(payload, "asr_text")) {
         showLiveCaption(payload.text);
+        // C8: распознанный текст сразу попадает в ленту, без номера фразы.
+        transcript?.push({ seq: 0, text: payload.text });
       } else if (isEvent(payload, "utterance")) {
         const utterance = payload.utterance;
         if (utterance && utterance.seq > lastSeq) {
           lastSeq = utterance.seq;
+          // C8: фраза заняла место безымянной строки `asr_text`.
+          transcript?.push({ seq: utterance.seq, text: utterance.text });
           notifyStudent(notificationKindFor({ type: "utterance" }, isStudentView));
           if (isTeacherView) {
             // E5: лента фраз обновляется сразу, не дожидаясь опроса HTMX.

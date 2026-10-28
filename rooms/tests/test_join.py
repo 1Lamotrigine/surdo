@@ -121,6 +121,23 @@ def test_live_shows_guest_after_join(client, open_room):
     assert "data-notification-status" in html
 
 
+def test_live_has_transcript_feed_after_join(client, open_room):
+    """C8: студент может перечитать распознанный текст списком фраз."""
+    client.post(
+        reverse("room_student:join", kwargs={"join_code": OPEN_ROOM_CODE}),
+        {"name": "Гость"},
+    )
+
+    html = client.get(
+        reverse("room_student:live", kwargs={"join_code": OPEN_ROOM_CODE})
+    ).content.decode()
+
+    assert "data-room-transcript" in html
+    assert "Расшифровка речи" in html
+    # Лента объявлена как журнал для скринридеров.
+    assert 'role="log"' in html
+
+
 def test_live_offers_pwa_install_after_join(client, open_room):
     """G2 / FR-27: после входа студенту предлагается установка PWA."""
     client.post(
