@@ -21,6 +21,7 @@ import {
 } from "three";
 
 import { DEFAULT_CROSSFADE_MS, MAX_CROSSFADE_MS, MIN_CROSSFADE_MS } from "./clip-queue";
+import { resetToNeutral } from "./vrm-rig";
 
 /** Элемент очереди: клип и слово субтитра, которое он показывает. */
 export type AnimationQueueItem = {
@@ -100,10 +101,9 @@ export class AnimationPlayer {
     this.frame = requestAnimationFrame(this.tick);
   }
 
-  /** Скорость на ходу (F8): меняем timeScale, не пересобирая очередь. */
+  /** Скорость на ходу (F8): меняем множитель времени, не пересобирая очередь. */
   setSpeed(speed: number): void {
     this.speed = Math.min(1.3, Math.max(0.6, speed));
-    this.mixer.timeScale = this.speed;
   }
 
   stop(): void {
@@ -113,6 +113,8 @@ export class AnimationPlayer {
     }
     this.mixer.stopAllAction();
     for (const action of this.actions) action.reset();
+    // Между фразами аватар стоит нейтрально (FR-12), как и у ClipPlayer.
+    resetToNeutral(this.vrm);
   }
 
   dispose(): void {
