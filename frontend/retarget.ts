@@ -43,6 +43,8 @@ export type FingerPose = Record<string, Vec3>;
 export type RetargetedFrame = {
   /** Найден ли скелет в кадре (если нет — кадр пропускается). */
   hasPose: boolean;
+  /** Углы получены из пространственных направлений костей. */
+  world?: boolean;
   /** Позы туловища и рук. */
   bones: BonePose | null;
   /** Позы пальцев левой кисти. */

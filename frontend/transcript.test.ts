@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   TRANSCRIPT_MAX_LINES,
-  appendTranscript,
   lastKnownSeq,
-  shouldStickToBottom,
+  prependTranscript,
+  shouldStickToTop,
   transcriptText,
   type TranscriptLine,
 } from "./transcript";
@@ -23,36 +23,44 @@ describe("transcriptText", () => {
   });
 });
 
-describe("appendTranscript", () => {
-  it("добавляет фразы по порядку номеров", () => {
-    let all = appendTranscript([], { seq: 1, text: "первая" });
-    all = appendTranscript(all, { seq: 2, text: "вторая" });
+describe("prependTranscript", () => {
+  it("ставит свежие фразы сверху", () => {
+    let all = prependTranscript([], { seq: 1, text: "первая" });
+    all = prependTranscript(all, { seq: 2, text: "вторая" });
 
-    expect(all).toEqual(lines([1, "первая"], [2, "вторая"]));
+    expect(all).toEqual(lines([2, "вторая"], [1, "первая"]));
   });
 
   it("не повторяет фразу с тем же или меньшим номером", () => {
-    const all = appendTranscript(lines([5, "пятая"]), { seq: 5, text: "пятая" });
+    const all = prependTranscript(lines([5, "пятая"]), { seq: 5, text: "пятая" });
 
     expect(all).toEqual(lines([5, "пятая"]));
   });
 
   it("заменяет безымянную строку, а не плодит дубли", () => {
-    let all = appendTranscript([], { seq: 0, text: "распознаём…" });
-    all = appendTranscript(all, { seq: 0, text: "распознано" });
+    let all = prependTranscript([], { seq: 0, text: "распознаём…" });
+    all = prependTranscript(all, { seq: 0, text: "распознано" });
 
     expect(all).toEqual(lines([0, "распознано"]));
   });
 
-  it("сохраняет безымянную строку перед нумерованной", () => {
-    let all = appendTranscript([], { seq: 0, text: "черновик" });
-    all = appendTranscript(all, { seq: 1, text: "фраза" });
+  it("заменяет безымянную строку нумерованной фразой", () => {
+    let all = prependTranscript([], { seq: 0, text: "черновик" });
+    all = prependTranscript(all, { seq: 1, text: "фраза" });
 
-    expect(all).toEqual(lines([0, "черновик"], [1, "фраза"]));
+    expect(all).toEqual(lines([1, "фраза"]));
+  });
+
+  it("не дублирует одну фразу после asr_text и utterance", () => {
+    let all = prependTranscript([], { seq: 3, text: "старая" });
+    all = prependTranscript(all, { seq: 0, text: "Привет" });
+    all = prependTranscript(all, { seq: 4, text: "Привет" });
+
+    expect(all).toEqual(lines([4, "Привет"], [3, "старая"]));
   });
 
   it("пропускает пустой текст", () => {
-    const all = appendTranscript(lines([1, "есть"]), { seq: 2, text: "   " });
+    const all = prependTranscript(lines([1, "есть"]), { seq: 2, text: "   " });
 
     expect(all).toEqual(lines([1, "есть"]));
   });
@@ -60,19 +68,19 @@ describe("appendTranscript", () => {
   it("обрезает ленту до предела, оставляя свежие строки", () => {
     let all: TranscriptLine[] = [];
     for (let seq = 1; seq <= 5; seq += 1) {
-      all = appendTranscript(all, { seq, text: `фраза ${seq}` }, 3);
+      all = prependTranscript(all, { seq, text: `фраза ${seq}` }, 3);
     }
 
-    expect(all.map((line) => line.seq)).toEqual([3, 4, 5]);
+    expect(all.map((line) => line.seq)).toEqual([5, 4, 3]);
     expect(all).toHaveLength(3);
   });
 
   it("с нулевым пределом лента пуста", () => {
-    expect(appendTranscript([], { seq: 1, text: "фраза" }, 0)).toEqual([]);
+    expect(prependTranscript([], { seq: 1, text: "фраза" }, 0)).toEqual([]);
   });
 
   it("не бросает на отрицательном номере", () => {
-    const all = appendTranscript([], { seq: -7, text: "фраза" });
+    const all = prependTranscript([], { seq: -7, text: "фраза" });
 
     expect(all).toEqual(lines([0, "фраза"]));
   });
@@ -80,11 +88,12 @@ describe("appendTranscript", () => {
   it("по умолчанию предел равен TRANSCRIPT_MAX_LINES", () => {
     let all: TranscriptLine[] = [];
     for (let seq = 1; seq <= TRANSCRIPT_MAX_LINES + 10; seq += 1) {
-      all = appendTranscript(all, { seq, text: `фраза ${seq}` });
+      all = prependTranscript(all, { seq, text: `фраза ${seq}` });
     }
 
     expect(all).toHaveLength(TRANSCRIPT_MAX_LINES);
-    expect(all[0].seq).toBe(11);
+    expect(all[0].seq).toBe(TRANSCRIPT_MAX_LINES + 10);
+    expect(all[TRANSCRIPT_MAX_LINES - 1].seq).toBe(11);
   });
 });
 
@@ -96,31 +105,31 @@ describe("lastKnownSeq", () => {
   });
 });
 
-describe("shouldStickToBottom", () => {
-  it("внизу списка — прокручиваем", () => {
+describe("shouldStickToTop", () => {
+  it("наверху списка — прокручиваем", () => {
     expect(
-      shouldStickToBottom({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 }),
+      shouldStickToTop({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 }),
     ).toBe(true);
     expect(
-      shouldStickToBottom({ scrollTop: 960, scrollHeight: 1000, clientHeight: 100 }),
+      shouldStickToTop({ scrollTop: 40, scrollHeight: 1000, clientHeight: 100 }),
     ).toBe(true);
   });
 
-  it("студент читает выше — не дёргаем ленту", () => {
+  it("студент читает ниже — не дёргаем ленту", () => {
     expect(
-      shouldStickToBottom({ scrollTop: 100, scrollHeight: 2000, clientHeight: 400 }),
+      shouldStickToTop({ scrollTop: 900, scrollHeight: 2000, clientHeight: 400 }),
     ).toBe(false);
   });
 
   it("допуск задаётся в пикселях", () => {
-    const metrics = { scrollTop: 500, scrollHeight: 1000, clientHeight: 400 };
-    expect(shouldStickToBottom(metrics, 200)).toBe(true);
-    expect(shouldStickToBottom(metrics, 50)).toBe(false);
+    const metrics = { scrollTop: 100, scrollHeight: 1000, clientHeight: 400 };
+    expect(shouldStickToTop(metrics, 200)).toBe(true);
+    expect(shouldStickToTop(metrics, 50)).toBe(false);
   });
 
   it("лента короче окна считается прокручиваемой", () => {
     expect(
-      shouldStickToBottom({ scrollTop: 0, scrollHeight: 50, clientHeight: 300 }),
+      shouldStickToTop({ scrollTop: 0, scrollHeight: 50, clientHeight: 300 }),
     ).toBe(true);
   });
 });

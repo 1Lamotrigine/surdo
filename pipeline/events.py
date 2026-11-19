@@ -16,7 +16,8 @@ import threading
 from channels.layers import get_channel_layer
 from django.db.models.functions import Upper
 
-from dictionary.models import Language, Sign, SignStatus
+from dictionary.models import Language, Sign, SignClip, SignStatus
+from services.gloss import number_clip_glosses
 
 logger = logging.getLogger(__name__)
 
@@ -58,23 +59,8 @@ def _clip_payload(sign: Sign, clip) -> dict:
     }
 
 
-def select_best_clip(clips: list) -> object | None:
-    """Лучший клип жеста: анимация важнее landmarks, затем версия и кадры.
-
-    Если у жеста есть и запись с камеры, и ручная анимация (H1), показываем
-    анимацию — она сделана специально для модели. Иначе поведение прежнее:
-    последняя версия, затем больше кадров.
-    """
-    if not clips:
-        return None
-    return max(
-        clips,
-        key=lambda clip: (
-            clip.is_animation,
-            clip.version,
-            clip.frames,
-        ),
-    )
+def select_best_clip(clips: list[SignClip]) -> SignClip | None:
+    return SignClip.best_of(clips)
 
 
 def _iter_gloss_slots(glosses: dict):
@@ -82,16 +68,16 @@ def _iter_gloss_slots(glosses: dict):
     for token_index, token in enumerate(glosses.get("tokens") or []):
         token_type = token.get("type")
         if token_type == "sign" and token.get("gloss"):
-            yield token_index, "sign", str(token["gloss"]).strip()
+            yield token_index, "sign", (str(token["gloss"]).strip(),)
         elif token_type == "number" and token.get("value") is not None:
-            yield token_index, "number", f"ЦИФРА_{token['value']}"
+            yield token_index, "number", number_clip_glosses(token["value"])
         elif token_type == "fingerspell":
             for raw_letter in token.get("letters") or []:
                 letter = str(raw_letter).upper()
                 if letter.isdigit():
-                    yield token_index, "fingerspell", f"ЦИФРА_{letter}"
+                    yield token_index, "fingerspell", number_clip_glosses(letter)
                 elif letter:
-                    yield token_index, "fingerspell", f"ДАКТИЛЬ_{letter}"
+                    yield token_index, "fingerspell", (f"ДАКТИЛЬ_{letter}",)
 
 
 def clip_refs_for_glosses(glosses: dict) -> list[dict]:
@@ -111,7 +97,7 @@ def clip_refs_for_glosses(glosses: dict) -> list[dict]:
     if not slots:
         return []
 
-    wanted = {gloss.upper() for _, _, gloss in slots}
+    wanted = {gloss.upper() for _, _, candidates in slots for gloss in candidates}
     signs = (
         Sign.objects.filter(lang=lang, status=SignStatus.VERIFIED)
         .annotate(gloss_key=Upper("gloss"))
@@ -131,8 +117,8 @@ def clip_refs_for_glosses(glosses: dict) -> list[dict]:
         best_by_gloss.setdefault(sign.gloss.upper(), (sign, best))
 
     refs: list[dict] = []
-    for token_index, kind, gloss in slots:
-        found = best_by_gloss.get(gloss.upper())
+    for token_index, kind, candidates in slots:
+        found = next((best_by_gloss[g.upper()] for g in candidates if g.upper() in best_by_gloss), None)
         if found is None:
             continue
         sign, clip = found

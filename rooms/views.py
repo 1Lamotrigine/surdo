@@ -82,15 +82,7 @@ def room_detail(request: HttpRequest, join_code: str):
 
 
 def _phrase_feed_context(room: Room) -> dict:
-    phrases = recent_room_utterances(room)
-    latest_unknown: list[str] = []
-    if phrases:
-        latest_unknown = [
-            str(word)
-            for word in (phrases[-1].glosses.get("unknown") or [])
-            if str(word).strip()
-        ]
-    return {"phrases": phrases, "latest_unknown_words": latest_unknown}
+    return {"phrases": recent_room_utterances(room)}
 
 
 def _phrase_form_context(
@@ -120,6 +112,7 @@ def room_live(request: HttpRequest, join_code: str):
         "room": room,
         "join_url": build_join_url(request, room.join_code),
         "qr_svg": room_qr_svg(request, room),
+        "avatar_model_url": settings.AVATAR_MODEL_URL,
         **_phrase_form_context(room),
         **_phrase_feed_context(room),
     }

@@ -90,6 +90,19 @@ function applyBoneRotation(vrm: VRM, name: VrmBone, rotation: Vec3, clampRad = M
   bone.quaternion.copy(_quat);
 }
 
+/**
+ * Rest-позиция бёдер из нормализованного рига.
+ *
+ * Узел `hips` нормализованного рига стоит на **абсолютной** мировой высоте
+ * (~1.04 в единицах модели), а не в начале координат. Значение берётся из
+ * `normalizedRestPose`, поэтому не зависит от того, в какой позе сейчас модель.
+ */
+function hipsRestPosition(vrm: VRM): Vec3 | null {
+  const rest = vrm.humanoid.normalizedRestPose?.hips?.position as number[] | undefined;
+  if (!rest) return null;
+  return { x: rest[0], y: rest[1], z: rest[2] };
+}
+
 /** Применить позы туловища и рук. */
 function applyBones(vrm: VRM, bones: BonePose): void {
   for (const [source, target] of Object.entries(BONE_MAP)) {
@@ -98,15 +111,36 @@ function applyBones(vrm: VRM, bones: BonePose): void {
     applyBoneRotation(vrm, target, rotation);
   }
 
-  // Бедра: смещение центра тела (небольшое, чтобы аватар не «улетал»).
+  // Бедра: Kalidokit отдаёт *смещение* центра тела, а не абсолютную позицию.
+  // Писать его вместо rest-высоты нельзя: модель падает в начало координат
+  // (≈1.04 вниз) и из кадра видна только голова.
   const hips = vrm.humanoid.getNormalizedBoneNode("hips");
   if (hips) {
-    hips.position.set(bones.Hips.position.x * 0.1, bones.Hips.position.y * 0.1, 0);
+    const rest = hipsRestPosition(vrm);
+    // Смещение малое: x в Kalidokit доходит до ±0.5, поэтому масштаб 0.1.
+    const dx = bones.Hips.position.x * 0.1;
+    const dy = bones.Hips.position.y * 0.1;
+    if (rest) {
+      hips.position.set(rest.x + dx, rest.y + dy, rest.z);
+    } else {
+      // Модель без `normalizedRestPose`: сохраняем текущую высоту как опору.
+      hips.position.x += dx;
+      hips.position.y += dy;
+    }
+    const rotation = bones.Hips.rotation;
+    _euler.set(
+      clamp(rotation.x, -Math.PI, Math.PI),
+      clamp(rotation.y, -Math.PI, Math.PI),
+      clamp(rotation.z, -Math.PI, Math.PI),
+      "XYZ",
+    );
+    _quat.setFromEuler(_euler);
+    hips.quaternion.copy(_quat);
   }
 }
 
 /** Применить позы пальцев одной кисти. */
-function applyFingers(vrm: VRM, side: (typeof FINGER_SIDES)[number], fingers: FingerPose): void {
+function applyFingers(vrm: VRM, side: (typeof FINGER_SIDES)[number], fingers: FingerPose, limit: number): void {
   for (const [joint, rotation] of Object.entries(fingers)) {
     if (!joint.startsWith(side)) continue;
 
@@ -120,7 +154,7 @@ function applyFingers(vrm: VRM, side: (typeof FINGER_SIDES)[number], fingers: Fi
 
     // Пальцы сгибаются по z; x/y для них в Kalidokit нулевые или малы.
     const boneName = `${side[0].toLowerCase()}${side.slice(1)}${finger}${vrmSegment}` as VrmBone;
-    applyBoneRotation(vrm, boneName, rotation, Math.PI / 2);
+    applyBoneRotation(vrm, boneName, rotation, limit);
   }
 }
 
@@ -156,17 +190,51 @@ function applyFace(vrm: VRM, face: RetargetedFace): void {
  */
 export function applyRetargetedFrame(vrm: VRM, frame: RetargetedFrame): void {
   if (frame.bones) applyBones(vrm, frame.bones);
-  if (frame.leftFingers) applyFingers(vrm, "Left", frame.leftFingers);
-  if (frame.rightFingers) applyFingers(vrm, "Right", frame.rightFingers);
+  const fingerLimit = frame.world ? Math.PI : Math.PI / 2;
+  if (frame.leftFingers) applyFingers(vrm, "Left", frame.leftFingers, fingerLimit);
+  if (frame.rightFingers) applyFingers(vrm, "Right", frame.rightFingers, fingerLimit);
   if (frame.face) applyFace(vrm, frame.face);
 }
 
 /**
- * Вернуть модель в нейтральную позу: rest pose и нулевая мимика.
- * Используется между клипами (ТЗ 5.4: нейтральная поза в начале и конце).
+ * Угол наклона плеча из T-позы в положение «руки вниз» и лёгкий изгиб локтя.
+ *
+ * У VRM rest pose — руки в стороны (T-поза). Без этих поворотов аватар стоит
+ * «буквой Т» и до первой фразы, и между жестами. Значения подобраны под
+ * VRM-модель проекта (руки идут вниз вдоль тела, кисти чуть от корпуса).
+ */
+const ARM_DOWN = THREE.MathUtils.degToRad(80);
+const ELBOW_RELAX = THREE.MathUtils.degToRad(15);
+export const RELAXED_ARM_ROTATIONS: Partial<Record<keyof BonePose, Vec3>> = {
+  RightUpperArm: { x: 0, y: 0, z: ARM_DOWN },
+  LeftUpperArm: { x: 0, y: 0, z: -ARM_DOWN },
+  RightLowerArm: { x: 0, y: 0, z: -ELBOW_RELAX },
+  LeftLowerArm: { x: 0, y: 0, z: ELBOW_RELAX },
+};
+
+/**
+ * Поставить руки вниз — спокойное положение вместо T-позы.
+ *
+ * Вызывать после `resetNormalizedPose()`: тот возвращает rest pose, а эта
+ * функция опускает плечи. Понимает только humanoid-кости рук, остальное
+ * (таз, корпус, голова) остаётся в rest.
+ */
+export function applyRelaxedArms(vrm: VRM): void {
+  for (const [source, rotation] of Object.entries(RELAXED_ARM_ROTATIONS)) {
+    applyBoneRotation(vrm, BONE_MAP[source], rotation);
+  }
+}
+
+/**
+ * Вернуть модель в нейтральную позу: руки вниз и нулевая мимика.
+ * Используется при загрузке и между клипами (ТЗ 5.4: нейтральная поза).
  */
 export function resetToNeutral(vrm: VRM): void {
-  vrm.humanoid.setNormalizedPose(vrm.humanoid.normalizedRestPose);
+  // `resetNormalizedPose`, а не `setNormalizedPose(rest)`: rest pose передан
+  // относительными трансформами даёт задвоение и модель вырастает вдвое.
+  vrm.humanoid.resetNormalizedPose();
+  // Rest pose — T-поза; опускаем руки, чтобы аватар стоял спокойно.
+  applyRelaxedArms(vrm);
 
   const expressions = vrm.expressionManager;
   if (!expressions) return;

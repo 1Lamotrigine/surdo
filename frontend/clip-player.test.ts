@@ -36,6 +36,9 @@ function makeFakeVrm(): { vrm: VRM; bones: Map<string, THREE.Object3D>; expressi
       setNormalizedPose: () => {
         resets += 1;
       },
+      resetNormalizedPose: () => {
+        resets += 1;
+      },
       normalizedRestPose: {},
     },
     expressionManager: {

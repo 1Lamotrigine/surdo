@@ -230,3 +230,15 @@ def test_fallback_rejects_unsupported_gloss_shape_via_validation():
 
     with pytest.raises(GlossFormatError, match="sentence_type"):
         validate_glosses(result)
+
+
+def test_standalone_replies_without_recordings_are_fingerspelled():
+    dictionary = GlossDictionary.from_glosses([], lang="rsl", version=0)
+    result = fallback_glosses("Нет, спасибо, пожалуйста, стоп.", "rsl", dictionary)
+
+    assert [(token["type"], token["src"].lower()) for token in result["tokens"]] == [
+        ("fingerspell", "нет"),
+        ("fingerspell", "спасибо"),
+        ("fingerspell", "пожалуйста"),
+        ("fingerspell", "стоп"),
+    ]

@@ -11,6 +11,8 @@ assets/**/*.vrm
 assets/**/*.vrma
 assets/**/*.glb
 assets/**/*.blend
+# Модель MediaPipe для конвертации Slovo (скачивается скриптом при первом запуске).
+assets/**/*.task
 .pytest_cache/
 .ruff_cache/
 .coverage

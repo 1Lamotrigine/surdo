@@ -14,7 +14,13 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # Домашний каталог для кэша моделей (Whisper/VAD). У системного
+    # пользователя по умолчанию HOME=/nonexistent, из-за чего faster-whisper
+    # не мог скачать веса (PermissionError) и распознавание падало.
+    HOME=/home/app \
+    HF_HOME=/home/app/.cache/huggingface \
+    XDG_CACHE_HOME=/home/app/.cache
 
 WORKDIR /app
 
@@ -34,8 +40,8 @@ COPY --from=frontend /build/static/dist ./static/dist
 RUN SECRET_KEY=collectstatic-build \
     DEBUG=False \
     python manage.py collectstatic --noinput \
-    && mkdir -p /app/media \
-    && chown -R app:app /app
+    && mkdir -p /app/media /home/app/.cache/huggingface \
+    && chown -R app:app /app /home/app
 
 USER app
 

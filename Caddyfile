@@ -27,8 +27,15 @@
 		-Server
 	}
 
-	# Клипы жестов раздаёт сам Caddy: они неизменяемы (новая версия — новый
-	# файл), поэтому кэш «навсегда»; file_server добавляет ETag и 304.
+	# Клипы жестов: URL вида `/media/clips/<id>.<ext>` — виртуальный, файл в
+	# томе лежит под своим именем (`clips/import/...`), поэтому путь резолвит
+	# Django (`dictionary.views.clip_file`) и отдаёт файл с ETag/304 и кэшем.
+	handle /media/clips/* {
+		reverse_proxy web:8000
+	}
+
+	# Остальное медиа (модель аватара и т. п.) — прямо из тома, без Django:
+	# файлы неизменяемы, file_server добавляет ETag и 304.
 	handle /media/* {
 		root * /srv
 		header Cache-Control "public, max-age=604800, immutable"

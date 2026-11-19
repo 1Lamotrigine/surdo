@@ -208,7 +208,11 @@ async def compute_glosses_async(
     effective_timeout = _resolve_timeout(timeout)
     started = perf_counter()
     try:
-        dictionary = await database_sync_to_async(verified_gloss_dictionary)(lang)
+        # thread_sensitive=False: функция вызывается из очереди фраз, а у неё
+        # собственный цикл событий без потока-инициатора `async_to_sync`.
+        dictionary = await database_sync_to_async(
+            verified_gloss_dictionary, thread_sensitive=False
+        )(lang)
         effective_provider = provider or get_llm_provider()
         return await asyncio.wait_for(
             asyncio.to_thread(
@@ -243,5 +247,10 @@ async def compute_glosses_async(
         )
     finally:
         # Словарь читался в потоке asgiref; не оставляем там соединение
-        # висеть между фразами.
-        await database_sync_to_async(connections.close_all)()
+        # висеть между фразами. Закрытие не должно затирать исходную ошибку.
+        try:
+            await database_sync_to_async(
+                connections.close_all, thread_sensitive=False
+            )()
+        except Exception:  # noqa: BLE001 — закрытие не прячет причину
+            logger.debug("close_all после глосс не удался", exc_info=True)

@@ -256,6 +256,12 @@ def _animation_names(payload: dict) -> tuple[str, ...]:
     return tuple(names)
 
 
+def is_demo_animation(payload: dict) -> bool:
+    """Распознать пакет заглушек по метке его генератора GLB."""
+    asset = payload.get("asset")
+    return isinstance(asset, dict) and asset.get("generator") == "make_gestures_vrma.py"
+
+
 def parse_animation(
     blob: bytes,
     *,
@@ -281,6 +287,8 @@ def parse_animation(
         )
 
     payload = glb_json(blob)
+    if is_demo_animation(payload):
+        raise ClipFormatError("Пакет демонстрационных заглушек нельзя добавить в словарь.")
     extensions = payload.get("extensionsUsed")
     used = extensions if isinstance(extensions, list) else []
     vrma = VRMA_EXTENSION in used or suffix == ".vrma"

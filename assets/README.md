@@ -6,8 +6,16 @@
 ```
 assets/
 ├── model/        # модель аватара: *.vrm (обычно один файл avatar.vrm)
+├── models/       # *.task: модель MediaPipe Holistic для конвертации Slovo
 └── animations/   # жесты: по одному файлу на жест, *.glb или *.vrma
 ```
+
+## Модель MediaPipe
+
+`assets/models/holistic_landmarker.task` скачивается автоматически при первом
+запуске `scripts/slovo_to_clips.py` (13 МБ, официальная float16-модель Google).
+В git не попадает. URL можно переопределить переменной окружения
+`MEDIAPIPE_HOLISTIC_MODEL_URL` или ключом `--model-url`.
 
 ## Модель
 
@@ -28,3 +36,15 @@ assets/
 
 Файл с несколькими жестами импортируется командой
 `python manage.py import_animations <файл>` (см. `../docs/ANIMATIONS.md`).
+
+## Тестовые анимации
+
+Для локальной проверки рига скрипт создаёт VRMA с десятью демонстрационными
+позами:
+
+```bash
+python scripts/make_gestures_vrma.py
+```
+
+Записи для словаря готовятся из Slovo или проверяются экспертом перед
+импортом. Демонстрационный VRMA помечен метаданными генератора.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -87,6 +88,7 @@ def _load_whisper_model(
     *,
     device: str,
     compute_type: str,
+    cpu_threads: int | None = None,
 ) -> Any:
     """Импортировать faster-whisper только при первой реальной фразе."""
     try:
@@ -95,10 +97,15 @@ def _load_whisper_model(
         raise AsrUnavailableError(
             "faster-whisper не установлен: выполните pip install -r requirements.txt."
         ) from exc
+    kwargs: dict[str, Any] = {}
+    if cpu_threads and cpu_threads > 0:
+        # CTranslate2 иначе берёт одно ядро и распознаёт медленнее.
+        kwargs["cpu_threads"] = cpu_threads
     return WhisperModel(
         model_size,
         device=device,
         compute_type=compute_type,
+        **kwargs,
     )
 
 
@@ -116,6 +123,7 @@ class FasterWhisperProvider:
         model_size: str | None = None,
         device: str | None = None,
         compute_type: str | None = None,
+        cpu_threads: int | None = None,
         model_factory: Callable[..., Any] | None = None,
     ) -> None:
         self.model_size = (
@@ -135,6 +143,12 @@ class FasterWhisperProvider:
             if compute_type is not None
             else self._default_compute_type(self.device)
         )
+        # Ядра для CTranslate2: без этого распознавание идёт в один поток.
+        self.cpu_threads = (
+            cpu_threads
+            if cpu_threads is not None
+            else int(os.environ.get("WHISPER_CPU_THREADS") or (os.cpu_count() or 1))
+        )
         self._model_factory = model_factory or _load_whisper_model
         self._model: Any | None = None
         self._model_lock = threading.Lock()
@@ -151,6 +165,17 @@ class FasterWhisperProvider:
     def model_loaded(self) -> bool:
         return self._model is not None
 
+    def warm_up(self) -> None:
+        """Заранее загрузить модель, если она ещё не в памяти.
+
+        Первая фраза после старта контейнера иначе платит за чтение весов с
+        диска (а при пустом кэше — ещё и за скачивание), поэтому субтитры
+        появляются с задержкой или не появляются вовсе, если не уложились в
+        ``ASR_TIMEOUT``. Загрузка идёт под тем же замком, что и в
+        ``transcribe``, поэтому повторный вызов безопасен.
+        """
+        self._get_model()
+
     def _get_model(self) -> Any:
         if self._model is not None:
             return self._model
@@ -161,12 +186,16 @@ class FasterWhisperProvider:
                         self.model_size,
                         device=self.device,
                         compute_type=self.compute_type,
+                        cpu_threads=self.cpu_threads,
                     )
                 except AsrError:
                     raise
                 except Exception as exc:
+                    # Причина важна для диагностики (например, PermissionError
+                    # на кэш моделей при HOME=/nonexistent).
                     raise AsrUnavailableError(
-                        f"Не удалось загрузить модель распознавания {self.model_size!r}."
+                        f"Не удалось загрузить модель распознавания "
+                        f"{self.model_size!r}: {type(exc).__name__}: {exc}"
                     ) from exc
         return self._model
 
@@ -185,8 +214,10 @@ class FasterWhisperProvider:
                 io.BytesIO(payload),
                 language=language,
                 task="transcribe",
-                beam_size=5,
-                best_of=5,
+                # beam_size=1 (жадное декодирование) вместо 5: та же точность на
+                # коротких фразах, но в 1.5–2 раза быстрее — важнее для задержки.
+                beam_size=1,
+                best_of=1,
                 vad_filter=False,
                 condition_on_previous_text=False,
                 without_timestamps=True,
@@ -262,6 +293,27 @@ class AsrService:
         if not isinstance(result, AsrResult):
             raise AsrError("Провайдер ASR вернул не AsrResult.")
         return result
+
+    def warm_up(self, *, timeout: float | None = None) -> bool:
+        """Подготовить провайдер в пуле, не блокируя вызывающий поток.
+
+        Возвращает ``False``, если у подменённого провайдера (например, в
+        тестах) нет метода ``warm_up``: такой провайдер не требует загрузки.
+        """
+        warm = getattr(self.provider, "warm_up", None)
+        if warm is None:
+            return False
+        if self._closed:
+            raise AsrUnavailableError("Пул распознавания уже остановлен.")
+        future = self._executor.submit(warm)
+        try:
+            future.result(timeout=timeout)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise AsrTimeoutError(
+                f"Загрузка модели не уложилась в {timeout} с."
+            ) from exc
+        return True
 
     def submit(self, audio: bytes, lang: str) -> Future[AsrResult]:
         """Поставить фразу в пул и вернуть ``Future`` без ожидания."""
@@ -359,6 +411,15 @@ def reset_asr_service() -> None:
         _default_service = None
     if previous is not None:
         previous.close(wait=False)
+
+
+def warm_up(*, timeout: float | None = 180.0) -> bool:
+    """Заранее загрузить модель общего сервиса (прогрев на старте).
+
+    Щедрый таймаут нужен только для скачивания весов при первом запуске;
+    обычный ``ASR_TIMEOUT`` к отдельной фразе остаётся прежним.
+    """
+    return get_asr_service().warm_up(timeout=timeout)
 
 
 def transcribe(

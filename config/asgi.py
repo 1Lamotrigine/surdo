@@ -6,8 +6,11 @@ HTTP обрабатывает Django, WebSocket — Channels. Проверка O
 """
 
 import asyncio
+import logging
 import os
+import threading
 
+from django.conf import settings
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -15,6 +18,30 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 # Приложение Django должно загрузиться до импорта routing/consumers:
 # consumer'ы могут обращаться к моделям и app registry.
 django_asgi_application = get_asgi_application()
+
+logger = logging.getLogger(__name__)
+
+
+def _warm_up_asr() -> None:
+    """Загрузить модель Whisper в фоне, чтобы первая фраза не ждала диск.
+
+    При пустом кэше веса ещё и скачиваются; это не должно задерживать старт
+    сайта, поэтому прогрев идёт в daemon-потоке и не влияет на healthcheck.
+    """
+    try:
+        from services.asr import warm_up
+
+        warm_up(timeout=180.0)
+        logger.info("ASR model is ready")
+    except Exception:  # noqa: BLE001 — прогрев не должен ронять сервер
+        logger.warning(
+            "ASR warm-up failed; the first phrase will load the model",
+            exc_info=True,
+        )
+
+
+if settings.ASR_WARMUP:
+    threading.Thread(target=_warm_up_asr, name="asr-warmup", daemon=True).start()
 
 from channels.auth import AuthMiddlewareStack  # noqa: E402
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402

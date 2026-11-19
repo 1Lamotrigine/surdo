@@ -152,15 +152,22 @@ class Command(BaseCommand):
                         f"Ожидается ГЛОССА=АНИМАЦИЯ, получено: {item!r}."
                     )
                 gloss, animation = (part.strip() for part in item.split("=", 1))
-                if not gloss or not animation:
-                    raise CommandError(f"Пустая часть в --map {item!r}.")
-                if animation not in available:
+                if not gloss:
+                    raise CommandError(f"Пустая глосса в --map {item!r}.")
+                # Пустое имя анимации — безымянная (первая) запись файла:
+                # Blender-экспорт без имени дорожки. Глоссу всё равно задаём явно.
+                if animation:
+                    if animation not in available:
+                        raise CommandError(
+                            f"В файле нет анимации {animation!r}. "
+                            f"Доступны: {', '.join(name or '(без имени)' for name in available)}."
+                        )
+                    if wanted and animation not in wanted:
+                        continue
+                elif "" not in available:
                     raise CommandError(
-                        f"В файле нет анимации {animation!r}. "
-                        f"Доступны: {', '.join(name or '(без имени)' for name in available)}."
+                        "В файле нет безымянной анимации: укажите имя в --map."
                     )
-                if wanted and animation not in wanted:
-                    continue
                 pairs.append((gloss, animation))
         else:
             for animation in available:

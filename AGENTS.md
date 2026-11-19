@@ -11,6 +11,7 @@
 | Python | 3.12 (3.12.11 локально, образ `python:3.12-slim`) |
 | Django | 5.2.18 (LTS) |
 | Channels / channels-redis | 4.3.2 / 4.3.0 |
+| redis (клиент) | 5.2.1 (channels-redis 4.3.0 несовместим с 8.x) |
 | uvicorn | 0.54.0 |
 | PostgreSQL | 16 |
 | Redis | 7 |
@@ -27,6 +28,7 @@
 | segno (QR, SVG) | 1.6.6 |
 | pymorphy3 | 2.0.6 |
 | faster-whisper | 1.2.1 |
+| PyAV (пакет `av`, для faster-whisper) | 18.1.0 (в av 19 убран metadata_errors) |
 | pytest / pytest-django / ruff | 9.1.1 / 4.14.0 / 0.17.3 |
 | daphne (только тесты Channels) | 4.2.3 |
 
@@ -149,10 +151,13 @@ app/
 - Распознавание речи (F5): `services/asr.py` — контракт
   `transcribe(audio, lang) -> AsrResult(text, duration_ms)` и провайдер
   `FasterWhisperProvider` (ленивая загрузка модели один раз под замком,
-  `WHISPER_MODEL`, `WHISPER_DEVICE`; CPU → int8, CUDA → float16).
+  `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_CPU_THREADS`; CPU → int8,
+  CUDA → float16; `cpu_threads` иначе один поток CTranslate2).
   `AsrService` держит отдельный `ThreadPoolExecutor` и
   `BoundedSemaphore(ASR_MAX_CONCURRENCY)`, даёт sync `transcribe` и async
   `transcribe_async`; аудио передаётся байтами в памяти и не сохраняется.
+  Задержка живой речи: жадное декодирование (`beam_size=1`, `best_of=1`) и
+  модель `base` по умолчанию (~1–2 с на фразу); `small` даёт ~3–5 с.
   Тесты используют валидный короткий WAV и подменённую модель, без скачивания
   весов.
 - Приём аудиофразы (F6): `POST /api/rooms/<code>/phrase/`
@@ -186,16 +191,21 @@ app/
   клиенте — `frontend/animation-clip.ts` (загрузка GLB, `pickAnimationClip`) и
   `frontend/animation-player.ts`
   (`AnimationMixer`, crossfade); `room-phrase.ts` играет фразу целиком из
-  анимаций. VRMA требует `@pixiv/three-vrm-animation` (пока не подключён,
-  загрузчик даёт `VrmaNotSupportedError`); смешанные фразы (анимации + дактиль
+  анимаций. VRMA разворачивается через `@pixiv/three-vrm-animation`
+  (`VRMAnimationLoaderPlugin` + `createVRMAnimationClip`): загрузчик получает
+  `vrm`, поэтому `loadAnimationBundle(url, {vrm})`; без модели на VRMA —
+  `VrmaNotSupportedError`. Смешанные фразы (анимации + дактиль
   landmarks) пока падают в landmarks с предупреждением. Полный гайд и чек-лист —
   `docs/ANIMATIONS.md`.
-- Лента расшифровки (C8): кроме субтитра с текущей фразой на странице студента
-  есть прокручиваемая лента прочитанного (`frontend/transcript.ts`,
-  `[data-room-transcript]`). Наполняется из `asr_text`, `utterance` и догрузки
-  после переподключения; дубли гасятся по `seq`, лента ограничена 200 строками,
-  автопрокрутка вниз не мешает чтению выше. Так студент может перечитать
-  сказанное, если не успел за жестами.
+- Лента расшифровки (C8): кроме субтитра с текущей фразой есть прокручиваемая
+  лента прочитанного (`frontend/transcript.ts`, `[data-room-transcript]`) — и на
+  странице студента, и в ленте преподавателя. **Свежие фразы идут сверху**
+  (ленту читают с экрана, первым должно быть последнее сказанное). Наполняется
+  из `asr_text`, `utterance` и догрузки после переподключения; дубли гасятся по
+  `seq`, лента ограничена 200 строками, автопрокрутка наверх не мешает чтению
+  ниже. Так можно перечитать сказанное, если не успел за жестами.
+  Лента идёт прямо под сценой аватара на обеих страницах: на панели
+  преподавателя `_phrase_feed.html` включён в `.teacher-live-side` под аватаром.
 - Живые фразы (E3): `pipeline/events.py` рассылает в группу `room_<id>`
   `asr_text` (сразу распознанный текст) и `utterance` (глоссы E1 + клипы
   проверенных жестов/чисел/дактиля в порядке показа). Фоновый поток очереди
@@ -203,6 +213,11 @@ app/
   `run_coroutine_threadsafe`; `RoomConsumer` отдаёт оба события клиенту.
   Студент (`frontend/room-live.ts` + ленивый `room-phrase.ts`) показывает текст
   сразу, ставит фразы в `PhraseQueue`, подгружает клипы и подсвечивает слова.
+  Сцена аватара есть и у студента (`/r/<code>/live/`), и на панели
+  преподавателя (`/rooms/<code>/live/`): у обоих `frontend/room-live.ts` сразу
+  при входе создаёт `RoomPhrasePlayer` и грузит `AVATAR_MODEL_URL`. Метрику
+  отставания шлёт только студент (`onDisplayStarted`) — показ у преподавателя
+  лишь зеркалит то, что видит студент.
   После переподключения пропущенные фразы догружаются через
   `GET /api/rooms/<code>/history/?after_seq=` и попадают в ленту расшифровки
   (C8), но не проигрываются: жесты тех фраз уже устарели.
@@ -259,8 +274,11 @@ app/
   healthcheck `web` через `/health/` (caddy ждёт healthy), логи с ротацией,
   порты db/redis только на loopback. `Caddyfile` — адрес из `SITE_ADDRESS`
   (`:80` локально, домен с автоматическим HTTPS в проде), HSTS и заголовки
-  безопасности, клипы из `/srv/media`, `reverse_proxy web:8000` (WebSocket
-  Caddy проксирует сам). `config/settings.py` при `DEBUG=False` включает
+  безопасности, `/media/clips/*` идёт на Django (URL клипа виртуальный:
+  `/media/clips/<id>.<ext>` резолвит вью, файл в томе лежит под своим именем),
+  остальное `/media/*` — из тома `/srv/media`, `reverse_proxy web:8000`
+  (WebSocket Caddy проксирует сам). `config/settings.py` при `DEBUG=False`
+  включает
   `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/HSTS/`X_FRAME_OPTIONS`, а
   `RETENTION_DAYS` задаёт срок хранения. Команда `purge_old_data`
   (`pipeline/retention.py`) удаляет чат/фразы и закрытые комнаты старше срока;

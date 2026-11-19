@@ -7,6 +7,12 @@
   --accent: #1d4ed8;
   --border: #d9dee8;
   --radius: 16px;
+  /* Форма кадра аватара: выше, чем шире — жесты руками должны помещаться по
+     вертикали (поднятая рука выше макушки). Отдельные числа нужны для расчёта
+     ширины через высоту окна. */
+  --avatar-aspect: 3 / 4;
+  --avatar-aspect-w: 3;
+  --avatar-aspect-h: 4;
 }
 
 * {
@@ -268,7 +274,9 @@ main {
 }
 
 .student-room .student-stage .avatar-stage {
-  max-height: none;
+  /* Аватар по центру и не шире разумного: жесты видны, кадр не растянут. */
+  width: min(100%, calc(80vh * var(--avatar-aspect-w) / var(--avatar-aspect-h)));
+  margin-inline: auto;
 }
 
 .student-room .student-stage .avatar-subtitles {
@@ -604,11 +612,23 @@ body.notification-flash[data-notification="chat"]::after {
 .teacher-live-side {
   display: grid;
   gap: 1.25rem;
+  /* min-width: 0 не даёт колонке переполняться содержимым (canvas, длинные
+     подписи) и «уезжать» к правому краю на узких экранах. */
+  min-width: 0;
 }
 
 .teacher-live-main {
   display: grid;
   gap: 1.25rem;
+  min-width: 0;
+}
+
+/* Средние экраны (планшет, ноутбук в пол-окна): две колонки уже тесны —
+   аватар и форма сжимаются. Схлопываем в одну колонку раньше, чем 600px. */
+@media (max-width: 900px) {
+  .teacher-live-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* F7: микрофон преподавателя с VAD. */
@@ -834,6 +854,56 @@ body.notification-flash[data-notification="chat"]::after {
 .teacher-monitor {
   display: grid;
   gap: 1rem;
+}
+
+/* E3 на панели преподавателя: тот же аватар и субтитры, что видит студент. */
+.teacher-avatar {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.teacher-avatar .avatar-stage {
+  width: min(100%, calc(70vh * var(--avatar-aspect-w) / var(--avatar-aspect-h)));
+  margin-inline: auto;
+}
+
+/* На широком экране сцена аватара не растягивается во всю колонку и не
+   липнет к краю: держим разумный максимум и центрируем. */
+@media (min-width: 901px) {
+  .teacher-avatar .avatar-stage {
+    max-width: 34rem;
+  }
+}
+
+.teacher-avatar .socket-status {
+  margin: 0;
+  justify-self: start;
+}
+
+.teacher-live-caption {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: #0b1220;
+  color: #f9fafb;
+  font-size: 1.3rem;
+  line-height: 1.5;
+}
+
+.teacher-live-caption[hidden] {
+  display: none;
+}
+
+.teacher-phrase-status {
+  min-height: 1.2em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .lag-panel,
@@ -1169,15 +1239,17 @@ h1 {
 }
 
 .qr-code {
+  /* Код занимает всю ширину панели: SVG с viewBox масштабируется целиком,
+     поэтому размер всегда совпадает с контейнером. */
   width: 100%;
-  max-width: 20rem;
+  aspect-ratio: 1 / 1;
   margin-inline: auto;
 }
 
 .qr-code svg {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
 }
 
 .qr-hint {
@@ -1600,9 +1672,12 @@ button:focus-visible {
 
 .avatar-stage {
   position: relative;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  max-height: 70vh;
+  /* Кадр выше, чем шире: жесты показываются руками, и поднятая рука должна
+     помещаться по вертикали. Ширина ограничена и колонкой, и высотой кадра,
+     поэтому `max-height` задаём через ширину — пропорция не ломается. */
+  width: min(100%, calc(80vh * AVATAR_ASPECT_W / AVATAR_ASPECT_H));
+  aspect-ratio: var(--avatar-aspect);
+  margin-inline: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -2175,4 +2250,74 @@ button:focus-visible {
 /* D4: запись слова из очереди нераспознанных */
 .record-word {
   margin: 1rem 0;
+}
+
+/* Очень узкие экраны (телефон в портрете, ≤430px): колонки уже схлопнуты,
+   но остаются крупные отступы, панели и таблицы — поджимаем их, чтобы ничего
+   не вылезало за край и не появлялся горизонтальный скролл. */
+@media (max-width: 430px) {
+  .wrap {
+    width: min(1080px, 100% - 1.5rem);
+  }
+
+  main {
+    padding-block: 1.75rem;
+  }
+
+  body {
+    /* Длинные слова и URL переносим, а не растягиваем страницу. */
+    overflow-wrap: anywhere;
+  }
+
+  .microphone-panel,
+  .lag-panel,
+  .unknown-panel,
+  .teacher-avatar,
+  .phrase-feed,
+  .chat-panel,
+  .presence-panel,
+  .student-transcript {
+    padding: 0.9rem 1rem;
+  }
+
+  .teacher-live-head {
+    gap: 0.75rem;
+  }
+
+  .teacher-live-actions {
+    width: 100%;
+  }
+
+  /* Кнопки и поля формы — во всю ширину, чтобы не сжимались в нечитаемое. */
+  .teacher-live-actions .button,
+  .teacher-live-actions form,
+  .phrase-composer-row .button {
+    width: 100%;
+  }
+
+  .phrase-composer-row {
+    grid-template-columns: 1fr;
+  }
+
+  .teacher-live-caption,
+  .student-live-caption {
+    font-size: 1.15rem;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .avatar-subtitles {
+    padding: 0.8rem 1rem;
+  }
+
+  /* Таблица очереди: горизонтальная прокрутка вместо сломанной вёрстки. */
+  .queue-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .queue-table th,
+  .queue-table td {
+    padding: 0.55rem 0.7rem;
+  }
 }

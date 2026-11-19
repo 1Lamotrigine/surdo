@@ -42,19 +42,19 @@
       </p>
     </div>
 
-    {# C8: лента расшифровки — прочитать пропущенное, если не успел за жестами. #}
+    {# C8: лента расшифровки. Свежие фразы сверху, чтобы студент сразу видел
+       последнее сказанное и мог перечитать пропущенное прокруткой вниз. #}
     <section class="student-transcript-section" aria-labelledby="transcript-title">
       <h2 id="transcript-title">Расшифровка речи</h2>
       <p class="student-transcript-hint">
-        Текст фраз по порядку. Свежие снизу — прокрутите, чтобы перечитать.
+        Новые фразы появляются сверху. Прокрутите ниже, чтобы перечитать сказанное.
       </p>
       <div
         class="student-transcript"
         data-room-transcript
+        tabindex="0"
         role="log"
         aria-live="polite"
-        aria-relevant="additions"
-        tabindex="0"
       ></div>
     </section>
 

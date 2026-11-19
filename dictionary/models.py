@@ -98,11 +98,8 @@ class Sign(models.Model):
 
     @property
     def best_clip(self):
-        """Лучший клип жеста: анимация важнее landmarks, затем версия и кадры."""
-        clips = list(self.clips.all())
-        if not clips:
-            return None
-        return max(clips, key=lambda clip: (clip.is_animation, clip.version, clip.frames))
+        """Лучший клип жеста для воспроизведения."""
+        return SignClip.best_of(self.clips.all())
 
     def verify(self, expert, comment: str = "") -> None:
         """Низкоуровнево пометить жест проверенным и зафиксировать проверяющего.
@@ -153,6 +150,7 @@ class SignClip(models.Model):
             "Один файл может содержать несколько жестов (H1)."
         ),
     )
+    is_placeholder = models.BooleanField("демонстрационная заглушка", default=False, editable=False)
     fps = models.PositiveSmallIntegerField("кадров в секунду", default=30)
     duration_ms = models.PositiveIntegerField("длительность, мс", default=0)
     frames = models.PositiveIntegerField("кадров", default=0)
@@ -170,6 +168,15 @@ class SignClip(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sign.gloss} v{self.version}"
+
+    @staticmethod
+    def best_of(clips):
+        """Выбрать настоящий клип по формату, версии и числу кадров."""
+        return max(
+            (clip for clip in clips if not clip.is_placeholder),
+            key=lambda clip: (clip.is_animation, clip.version, clip.frames),
+            default=None,
+        )
 
     @property
     def storage_path(self) -> str:

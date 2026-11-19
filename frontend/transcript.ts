@@ -4,11 +4,12 @@
  * Субтитр (`subtitles.ts`) показывает **одну текущую** фразу: как только
  * преподаватель говорит следующую, предыдущий текст исчезает, и студент не
  * может перечитать пропущенное. Лента решает это: каждая распознанная фраза
- * добавляется в конец списка, старые остаются выше и доступны прокруткой.
+ * добавляется **сверху**, поэтому свежее сказанное всегда первое, а старое
+ * уходит вниз и доступно прокруткой.
  *
  * Здесь живёт **чистая** часть: предел ленты, отбор дублей по `seq`, выбор
- * видной строки и решение «прокручивать ли вниз» (не дёргать ленту, если
- * студент читает выше). DOM-слой `TranscriptView` только рисует строки.
+ * видной строки и решение «прокручивать ли наверх» (не дёргать ленту, если
+ * студент читает ниже). DOM-слой `TranscriptView` только рисует строки.
  *
  * Лента только для чтения: подсветка слова в ней не идёт (она в субтитрах).
  */
@@ -21,7 +22,7 @@ export type TranscriptLine = {
   text: string;
 };
 
-/** Сколько строк держим в ленте: старые вытесняются сверху. */
+/** Сколько строк держим в ленте: самые старые вытесняются снизу. */
 export const TRANSCRIPT_MAX_LINES = 200;
 
 /** Текст для строки: обрезаем пробелы; пустое не показываем. */
@@ -30,14 +31,15 @@ export function transcriptText(text: string): string {
 }
 
 /**
- * Добавить строку в конец ленты по правилам дублей и предела.
+ * Добавить строку **в начало** ленты по правилам дублей и предела.
  *
- * Фраза с уже известным `seq` (0 < seq ≤ последнего) не добавляется: события
- * `asr_text` и `utterance` описывают одну и ту же фразу, и переподключение
- * может прислать её повторно. `asr_text` приходит раньше и без `seq` (0):
- * такая строка заменяет последнюю строку без номера, а не плодит дубли.
+ * Свежая фраза идёт первой (сверху), старые сдвигаются вниз. Фраза с уже
+ * известным `seq` (0 < seq ≤ максимального) не добавляется: события `asr_text`
+ * и `utterance` описывают одну и ту же фразу, и переподключение может прислать
+ * её повторно. `asr_text` приходит раньше и без `seq` (0): такая строка
+ * заменяет первую строку без номера, а не плодит дубли.
  */
-export function appendTranscript(
+export function prependTranscript(
   lines: TranscriptLine[],
   line: TranscriptLine,
   max = TRANSCRIPT_MAX_LINES,
@@ -48,17 +50,20 @@ export function appendTranscript(
   const seq = Number.isFinite(line.seq) ? Math.max(0, Math.trunc(line.seq)) : 0;
 
   if (seq > 0) {
-    const lastSeq = lastKnownSeq(lines);
-    if (seq <= lastSeq) return lines;
-    return capTranscript([...lines, { seq, text }], max);
+    if (seq <= lastKnownSeq(lines)) return lines;
+    // `asr_text` уже показал эту же фразу без номера. Финализированная
+    // `utterance` (её текст может быть сжат по F8) заменяет черновую строку,
+    // а не добавляет вторую копию той же фразы.
+    const rest = lines[0]?.seq === 0 ? lines.slice(1) : lines;
+    return capTranscript([{ seq, text }, ...rest], max);
   }
 
-  // Без номера: либо заменяем такую же последнюю строку, либо добавляем.
-  const last = lines[lines.length - 1];
-  if (last && last.seq === 0) {
-    return capTranscript([...lines.slice(0, -1), { seq: 0, text }], max);
+  // Без номера: либо заменяем первую такую же строку, либо добавляем сверху.
+  const first = lines[0];
+  if (first && first.seq === 0) {
+    return capTranscript([{ seq: 0, text }, ...lines.slice(1)], max);
   }
-  return capTranscript([...lines, { seq: 0, text }], max);
+  return capTranscript([{ seq: 0, text }, ...lines], max);
 }
 
 /** Наибольший известный `seq` среди строк (0, если номеров нет). */
@@ -70,24 +75,24 @@ export function lastKnownSeq(lines: TranscriptLine[]): number {
   return last;
 }
 
-/** Оставить не больше `max` последних строк. */
+/** Оставить не больше `max` свежих строк: старые (в конце) отбрасываются. */
 function capTranscript(lines: TranscriptLine[], max: number): TranscriptLine[] {
   if (max <= 0) return [];
-  return lines.length > max ? lines.slice(lines.length - max) : lines;
+  return lines.length > max ? lines.slice(0, max) : lines;
 }
 
 /**
- * Нужно ли прокрутить ленту вниз после добавления строки.
+ * Нужно ли прокрутить ленту наверх после добавления строки.
  *
- * Если студент пролистал вверх и читает ранее сказанное, дёргать ленту нельзя:
- * иначе новая фраза утащит его вниз. Допуск (по умолчанию 48 px) — «почти внизу».
+ * Если студент пролистал вниз и читает ранее сказанное, дёргать ленту нельзя:
+ * иначе новая фраза утащит его наверх. Допуск (по умолчанию 48 px) — «почти
+ * наверху».
  */
-export function shouldStickToBottom(
+export function shouldStickToTop(
   metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },
   tolerance = 48,
 ): boolean {
-  const distance = metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight;
-  return distance <= Math.max(0, tolerance);
+  return metrics.scrollTop <= Math.max(0, tolerance);
 }
 
 /** Пустая лента: подпись, пока не пришла ни одна фраза. */
@@ -96,10 +101,10 @@ export const TRANSCRIPT_EMPTY_HINT = "Расшифровка появится, �
 /**
  * Лента расшифровки в DOM: список фраз под аватаром.
  *
- * Строки только добавляются (свежие снизу) и вытесняются по пределу. Прокрутка
- * вниз — только если студент и так внизу (`shouldStickToBottom`), чтобы чтение
- * выше не прерывалось. Класс `transcript-line-current` отмечает последнюю
- * фразу: её же показывает субтитр.
+ * Строки только добавляются (свежие сверху) и вытесняются по пределу. Прокрутка
+ * наверх — только если студент и так наверху (`shouldStickToTop`), чтобы чтение
+ * ниже не прерывалось. Класс `transcript-line-current` отмечает свежую фразу:
+ * её же показывает субтитр.
  */
 export class TranscriptView {
   private readonly root: HTMLElement;
@@ -123,10 +128,10 @@ export class TranscriptView {
     this.root.classList.add("transcript");
   }
 
-  /** Добавить фразу: дубли по `seq` и предел обрабатывает `appendTranscript`. */
+  /** Добавить фразу: дубли по `seq` и предел обрабатывает `prependTranscript`. */
   push(line: TranscriptLine): void {
     const before = this.lines;
-    this.lines = appendTranscript(this.lines, line, this.maxLines);
+    this.lines = prependTranscript(this.lines, line, this.maxLines);
     if (this.lines === before) return;
 
     this.render();
@@ -136,7 +141,7 @@ export class TranscriptView {
   replace(lines: TranscriptLine[]): void {
     this.lines = [];
     for (const line of lines) {
-      this.lines = appendTranscript(this.lines, line, this.maxLines);
+      this.lines = prependTranscript(this.lines, line, this.maxLines);
     }
     this.render(true);
   }
@@ -147,20 +152,20 @@ export class TranscriptView {
   }
 
   private render(force = false): void {
-    const stick = force || shouldStickToBottom(this.root);
+    const stick = force || shouldStickToTop(this.root);
 
     this.empty.hidden = this.lines.length > 0;
     this.list.replaceChildren(
       ...this.lines.map((line, index) => this.renderLine(line, index)),
     );
 
-    if (stick) this.root.scrollTop = this.root.scrollHeight;
+    if (stick) this.root.scrollTop = 0;
   }
 
   private renderLine(line: TranscriptLine, index: number): HTMLElement {
     const item = document.createElement("li");
     item.className = "transcript-line";
-    if (index === this.lines.length - 1) {
+    if (index === 0) {
       item.classList.add("transcript-line-current");
     }
     if (line.seq > 0) item.dataset.seq = String(line.seq);

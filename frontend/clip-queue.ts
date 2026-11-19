@@ -20,6 +20,9 @@
 
 import type { DecodedClip } from "./clip";
 
+/** Базовый темп показа жестов в комнатах и на странице аватара. */
+export const DEFAULT_AVATAR_SPEED = 0.7;
+
 /** Минимальная скорость воспроизведения (FR-13, FR-16). */
 export const MIN_SPEED = 0.6;
 

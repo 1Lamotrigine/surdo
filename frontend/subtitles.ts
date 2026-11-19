@@ -134,25 +134,23 @@ export function alignTokens(utterance: UtteranceGlosses): SubtitleWord[] {
   let cursor = 0;
 
   utterance.tokens.forEach((token, tokenIndex) => {
-    const source = normalizeWord(token.src);
-    if (!source) return;
+    const source = splitTextWords(token.src).map((word) => normalizeWord(word.word));
+    if (source.length === 0 || cursor >= words.length) return;
 
-    // Ищем точное совпадение от курсора, затем любое слово подряд.
-    let found = -1;
-    for (let i = cursor; i < words.length; i += 1) {
-      if (normalizeWord(words[i].word) === source) {
+    let found = cursor;
+    let length = 1;
+    for (let i = cursor; i + source.length <= words.length; i += 1) {
+      if (source.every((word, offset) => normalizeWord(words[i + offset].word) === word)) {
         found = i;
+        length = source.length;
         break;
       }
     }
-    if (found < 0 && cursor < words.length) {
-      found = cursor;
-    }
-    if (found < 0) return;
 
-    const word = words[found];
-    result.push({ text: word.word, start: word.start, end: word.end, tokenIndex });
-    cursor = found + 1;
+    const start = words[found].start;
+    const end = words[found + length - 1].end;
+    result.push({ text: utterance.text.slice(start, end), start, end, tokenIndex });
+    cursor = found + length;
   });
 
   return result;

@@ -49,6 +49,16 @@ from services.gloss import compress
 
 logger = logging.getLogger(__name__)
 
+# Очередь работает в собственном цикле событий в отдельном потоке. В таком
+# цикле «thread-sensitive» режим asgiref не работает: `database_sync_to_async`
+# по умолчанию идёт через CurrentThreadExecutor, привязанный к потоку, который
+# вызвал `async_to_sync`, а у нас такого потока нет — отсюда
+# «CurrentThreadExecutor already quit or is broken». Поэтому ORM в очереди
+# всегда вызывается с `thread_sensitive=False` (обычный пул потоков).
+def _db(func):
+    """Обёртка ORM для фонового цикла очереди (thread_sensitive=False)."""
+    return database_sync_to_async(func, thread_sensitive=False)
+
 
 class RoomQueueFullError(RuntimeError):
     """Самая старая необработанная фраза комнаты выброшена из очереди."""
@@ -164,12 +174,12 @@ async def _finish_phrase_async(
     # неизвестно. Берём последнее показанное и заранее решаем, ускорять ли
     # показ и сжимать ли текст. Сжатие идёт до глосс, чтобы клипы и субтитры
     # соответствовали уже сокращённой фразе.
-    lag_ms = await database_sync_to_async(latest_display_lag_ms)(room.pk)
+    lag_ms = await _db(latest_display_lag_ms)(room.pk)
     policy = lag_playback_policy(lag_ms)
     clean_text, compressed = await _compress_for_policy_async(clean_text, policy)
 
     outcome = await compute_glosses_async(clean_text, sign_lang)
-    utterance = await database_sync_to_async(create_utterance)(
+    utterance = await _db(create_utterance)(
         room,
         clean_text,
         lang=sign_lang,
@@ -181,7 +191,7 @@ async def _finish_phrase_async(
         playback=policy.as_event(compressed=compressed),
     )
     # Сборка клипов и рассылка обращаются к БД, поэтому тоже уходят из loop.
-    await database_sync_to_async(broadcast_utterance)(utterance)
+    await _db(broadcast_utterance)(utterance)
     return utterance
 
 
@@ -196,7 +206,7 @@ async def process_text_job_async(job: TextJob) -> Utterance:
     """
     broadcast_asr_text(job.room_id, job.text)
     try:
-        room, clean_text, sign_lang, started_at = await database_sync_to_async(
+        room, clean_text, sign_lang, started_at = await _db(
             _prepare_job
         )(job)
         return await _finish_phrase_async(
@@ -209,8 +219,13 @@ async def process_text_job_async(job: TextJob) -> Utterance:
         )
     finally:
         # Цикл очереди живёт всё время работы процесса; не держим соединение
-        # фонового потока открытым между редкими фразами.
-        await database_sync_to_async(connections.close_all)()
+        # фонового потока открытым между редкими фразами. Ошибку закрытия
+        # глотаем: иначе она затрёт настоящую причину сбоя фразы (например,
+        # недоступный Whisper) и в логах останется только RuntimeError.
+        try:
+            await _db(connections.close_all)()
+        except Exception:  # noqa: BLE001 — закрытие не должно прятать причину
+            logger.debug("close_all после текстовой фразы не удался", exc_info=True)
 
 
 async def process_audio_job_async(job: AudioJob) -> Utterance | None:
@@ -222,7 +237,7 @@ async def process_audio_job_async(job: AudioJob) -> Utterance | None:
     Тишина или пустое распознавание не создают ``Utterance``: субтитров нет.
     """
     try:
-        room, sign_lang, started_at = await database_sync_to_async(_prepare_audio_job)(
+        room, sign_lang, started_at = await _db(_prepare_audio_job)(
             job
         )
         started = perf_counter()
@@ -246,7 +261,12 @@ async def process_audio_job_async(job: AudioJob) -> Utterance | None:
             broadcast_text=True,
         )
     finally:
-        await database_sync_to_async(connections.close_all)()
+        # См. комментарий в process_text_job_async: закрытие не должно затирать
+        # настоящую ошибку обработки фразы.
+        try:
+            await _db(connections.close_all)()
+        except Exception:  # noqa: BLE001 — закрытие не должно прятать причину
+            logger.debug("close_all после аудиофразы не удался", exc_info=True)
 
 
 def process_text_job(job: TextJob) -> Utterance:
@@ -303,6 +323,7 @@ class PipelineQueue:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
+        self._stopped = threading.Event()
         self._lock = threading.Lock()
 
     @property
@@ -383,7 +404,7 @@ class PipelineQueue:
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
         self._ready.set()
         try:
-            loop.run_forever()
+            loop.run_until_complete(self._run_forever_in_context())
         finally:
             pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
             for task in pending:
@@ -392,6 +413,11 @@ class PipelineQueue:
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.close()
+
+    async def _run_forever_in_context(self) -> None:
+        """Ждать вечно, пока очередь не закроют (см. _run_loop)."""
+        while not self._stopped.is_set():
+            await asyncio.sleep(0.2)
 
     def _enqueue(self, job: TextJob | AudioJob) -> None:
         """Выполняется в фоновом цикле: создать очередь комнаты или дополнить её."""
@@ -461,8 +487,14 @@ class PipelineQueue:
             self._thread = None
         if loop is None or thread is None:
             return
-        loop.call_soon_threadsafe(loop.stop)
+        # Снимаем флаг: корутина внутри ThreadSensitiveContext завершится сама,
+        # и цикл остановится штатно (без «Event loop stopped before Future»).
+        self._stopped.set()
         thread.join(timeout=5)
+        if thread.is_alive():
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=5)
+        self._stopped.clear()
 
     def wait_for_idle(self, timeout: float = 5) -> None:
         """Дождаться, пока все комнаты опустеют (тесты, диагностика)."""

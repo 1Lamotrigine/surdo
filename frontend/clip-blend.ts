@@ -2,18 +2,18 @@
  * Блендинг кадров ретаргета (C4) — чистая функция без Three.js.
  *
  * Crossfade между клипами (ТЗ 5.4) склеивает два кадра ретаргета: соседние
- * кости получают взвешенную сумму углов, мимика — взвешенную сумму весов. Те же
+ * кости интерполируются по углам или кватернионам, мимика — по весам. Те же
  * функции смешивают клип со **нейтральной позой** в начале и конце каждого
  * клипа (FR-12): нейтраль — это пустой кадр (`neutralFrame`), поэтому переход к
  * ней всегда идёт через те же `lerpFrames`/`ease`.
  *
- * Работать с числами (`RetargetedFrame`), а не с кватернионами VRM, выгодно:
- * ретаргет уже посчитан, а `vrm-rig.ts` принимает именно эти числа. Плавность
- * достигается тем, что смешанные углы монотонно меняются от кадра A к кадру B.
  */
+
+import { Euler, Quaternion } from "three";
 
 import type { BonePose, FingerPose, RetargetedFace, RetargetedFrame } from "./retarget";
 import type { Vec3 } from "./one-euro";
+import { RELAXED_ARM_ROTATIONS } from "./vrm-rig";
 
 /** Пустой кадр ретаргета: соответствует нейтральной позе VRM. */
 export function neutralFrame(): RetargetedFrame {
@@ -49,38 +49,47 @@ function lerpVec3(a: Vec3, b: Vec3, t: number): Vec3 {
 /** Нулевой вектор (нейтральное значение кости и пальца). */
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
 
-/** Слить две позы туловища: отсутствующая сторона считается нейтральной (нули). */
-function lerpBones(a: BonePose | null, b: BonePose | null, t: number): BonePose | null {
+/** Кватернионы проводят пространственный поворот по кратчайшей дуге. */
+function slerpRotation(a: Vec3, b: Vec3, t: number): Vec3 {
+  const from = new Quaternion().setFromEuler(new Euler(a.x, a.y, a.z));
+  const to = new Quaternion().setFromEuler(new Euler(b.x, b.y, b.z));
+  const { x, y, z } = new Euler().setFromQuaternion(from.slerp(to, t));
+  return { x, y, z };
+}
+
+function lerpBones(a: BonePose | null, b: BonePose | null, t: number, world: boolean): BonePose | null {
   if (!a && !b) return null;
-  const from = a;
-  const to = b;
-  const bone = (get: (pose: BonePose) => Vec3): Vec3 =>
-    lerpVec3(from ? get(from) : ZERO, to ? get(to) : ZERO, t);
-  const hips = (key: "position" | "rotation"): Vec3 =>
-    lerpVec3(from?.Hips?.[key] ?? ZERO, to?.Hips?.[key] ?? ZERO, t);
+  const mix = world ? slerpRotation : lerpVec3;
+  const bone = (name: Exclude<keyof BonePose, "Hips">): Vec3 => {
+    const neutral = world ? RELAXED_ARM_ROTATIONS[name] ?? ZERO : ZERO;
+    return mix(a?.[name] ?? neutral, b?.[name] ?? neutral, t);
+  };
   return {
-    RightUpperArm: bone((p) => p.RightUpperArm),
-    RightLowerArm: bone((p) => p.RightLowerArm),
-    LeftUpperArm: bone((p) => p.LeftUpperArm),
-    LeftLowerArm: bone((p) => p.LeftLowerArm),
-    RightHand: bone((p) => p.RightHand),
-    LeftHand: bone((p) => p.LeftHand),
-    RightUpperLeg: bone((p) => p.RightUpperLeg),
-    RightLowerLeg: bone((p) => p.RightLowerLeg),
-    LeftUpperLeg: bone((p) => p.LeftUpperLeg),
-    LeftLowerLeg: bone((p) => p.LeftLowerLeg),
-    Hips: { position: hips("position"), rotation: hips("rotation") },
-    Spine: bone((p) => p.Spine),
+    RightUpperArm: bone("RightUpperArm"),
+    RightLowerArm: bone("RightLowerArm"),
+    LeftUpperArm: bone("LeftUpperArm"),
+    LeftLowerArm: bone("LeftLowerArm"),
+    RightHand: bone("RightHand"),
+    LeftHand: bone("LeftHand"),
+    RightUpperLeg: bone("RightUpperLeg"),
+    RightLowerLeg: bone("RightLowerLeg"),
+    LeftUpperLeg: bone("LeftUpperLeg"),
+    LeftLowerLeg: bone("LeftLowerLeg"),
+    Hips: {
+      position: lerpVec3(a?.Hips.position ?? ZERO, b?.Hips.position ?? ZERO, t),
+      rotation: mix(a?.Hips.rotation ?? ZERO, b?.Hips.rotation ?? ZERO, t),
+    },
+    Spine: bone("Spine"),
   };
 }
 
-/** Слить две позы пальцев: союз ключей, отсутствующий считается нейтральным. */
-function lerpFingers(a: FingerPose | null, b: FingerPose | null, t: number): FingerPose | null {
+function lerpFingers(a: FingerPose | null, b: FingerPose | null, t: number, world: boolean): FingerPose | null {
   if (!a && !b) return null;
+  const mix = world ? slerpRotation : lerpVec3;
   const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})]);
   const merged: FingerPose = {};
   for (const key of keys) {
-    merged[key] = lerpVec3(a?.[key] ?? ZERO, b?.[key] ?? ZERO, t);
+    merged[key] = mix(a?.[key] ?? ZERO, b?.[key] ?? ZERO, t);
   }
   return merged;
 }
@@ -121,11 +130,13 @@ function lerpFace(a: RetargetedFace | null, b: RetargetedFace | null, t: number)
  */
 export function lerpFrames(a: RetargetedFrame, b: RetargetedFrame, t: number): RetargetedFrame {
   const k = clamp01(t);
+  const world = Boolean(a.world || b.world);
   return {
+    ...(world ? { world } : {}),
     hasPose: a.hasPose || b.hasPose,
-    bones: lerpBones(a.bones, b.bones, k),
-    leftFingers: lerpFingers(a.leftFingers, b.leftFingers, k),
-    rightFingers: lerpFingers(a.rightFingers, b.rightFingers, k),
+    bones: lerpBones(a.bones, b.bones, k, world),
+    leftFingers: lerpFingers(a.leftFingers, b.leftFingers, k, world),
+    rightFingers: lerpFingers(a.rightFingers, b.rightFingers, k, world),
     face: lerpFace(a.face, b.face, k),
   };
 }

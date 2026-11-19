@@ -31,7 +31,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from services.morphology import FUNCTION_POS, split_words, word_forms
+from services.morphology import FUNCTION_POS, gloss_text_units, word_forms
 
 # Типы предложения и маркеры из ТЗ 7.2. Маркеры управляют мимикой и поворотом
 # головы аватара, поэтому неизвестные значения не пропускаются.
@@ -134,6 +134,19 @@ _NUMBER_WORDS = {
     "тысячи": 1000,
     "тысяч": 1000,
 }
+
+
+# Самостоятельные реплики: без записи сохраняем их в дактиле даже при
+# морфологическом разборе как междометия или частицы.
+_STANDALONE_REPLIES = frozenset({"нет", "спасибо", "пожалуйста", "стоп"})
+
+
+def number_clip_glosses(value: int | str) -> tuple[str, ...]:
+    """Сначала специальный клип числа, затем запись соответствующего слова."""
+    return (
+        f"ЦИФРА_{value}",
+        *(word.upper() for word, number in _NUMBER_WORDS.items() if str(number) == str(value)),
+    )
 
 
 
@@ -614,7 +627,10 @@ def fallback_glosses(
 
     tokens: list[dict] = []
     unknown: list[str] = []
-    for word in split_words(clean_text):
+    for word, phrase in gloss_text_units(clean_text, dictionary_version.glosses):
+        if phrase is not None:
+            tokens.append({"type": "sign", "gloss": phrase, "src": word, "markers": []})
+            continue
         if word.isdigit():
             tokens.append({"type": "number", "value": int(word), "src": word, "markers": []})
             continue
@@ -638,7 +654,9 @@ def fallback_glosses(
                 {"type": "sign", "gloss": canonical, "src": word, "markers": []}
             )
             continue
-        if any(form.pos in FUNCTION_POS for form in forms):
+        if normalize_gloss(word) not in _STANDALONE_REPLIES and any(
+            form.pos in FUNCTION_POS for form in forms
+        ):
             continue
 
         tokens.append(

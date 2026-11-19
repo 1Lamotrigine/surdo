@@ -55,6 +55,10 @@ services:
     # Один процесс: очереди фраз и presence живут в памяти процесса (ТЗ 5.7).
     command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 1
     env_file: .env
+    environment:
+      # Модель Whisper грузится (при пустом кэше — скачивается) на старте в
+      # фоне: первая фраза не платит за это и не упирается в ASR_TIMEOUT.
+      ASR_WARMUP: "1"
     depends_on:
       db:
         condition: service_healthy
@@ -62,6 +66,9 @@ services:
         condition: service_healthy
     volumes:
       - media:/app/media
+      # Кэш моделей Whisper/VAD: переживает пересборку образа, поэтому веса
+      # не скачиваются заново при каждом `up --build`.
+      - hfcache:/home/app/.cache
     # 8000 проброшен на хост, чтобы Django был доступен и напрямую, и через
     # Caddy (:80). `expose` оставлен для проксирования внутри сети Docker.
     ports:
@@ -109,5 +116,6 @@ services:
 volumes:
   pgdata:
   media:
+  hfcache:
   caddy_data:
   caddy_config:

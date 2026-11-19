@@ -261,5 +261,6 @@ def test_recent_room_utterances_returns_last_phrases_in_order(room, owner):
 
     phrases = recent_room_utterances(room, limit=2)
 
-    assert [utterance.seq for utterance in phrases] == [2, 3]
-    assert [utterance.text for utterance in phrases] == ["Фраза 1", "Фраза 2"]
+    # Свежие сверху: лента читается с экрана, первым идёт последнее сказанное.
+    assert [utterance.seq for utterance in phrases] == [3, 2]
+    assert [utterance.text for utterance in phrases] == ["Фраза 2", "Фраза 1"]

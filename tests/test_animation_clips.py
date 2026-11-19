@@ -448,6 +448,26 @@ def test_import_animations_supports_explicit_map(settings, tmp_path, editor):
     assert clip.duration_ms == 2000
 
 
+def test_import_animations_maps_unnamed_animation(settings, tmp_path, editor):
+    """VRMA из Blender часто без имени дорожки: --map "ГЛОССА=" берёт первую."""
+    settings.MEDIA_ROOT = tmp_path
+    source = tmp_path / "surd.vrma"
+    source.write_bytes(make_glb(vrma=True, names=[""], durations=[2.0]))
+
+    call_command(
+        "import_animations",
+        str(source),
+        "--map",
+        "ПРИВЕТ=",
+        stdout=StringIO(),
+    )
+
+    clip = SignClip.objects.get()
+    assert clip.sign.gloss == "ПРИВЕТ"
+    assert clip.animation_name == ""
+    assert clip.duration_ms == 2000
+
+
 def test_import_animations_dry_run_writes_nothing(settings, tmp_path, editor):
     settings.MEDIA_ROOT = tmp_path
     source = tmp_path / "gestures.glb"
@@ -463,3 +483,28 @@ def test_import_animations_dry_run_writes_nothing(settings, tmp_path, editor):
     assert Sign.objects.count() == 0
     assert SignClip.objects.count() == 0
     assert list((tmp_path / "clips").rglob("*.glb")) == []
+
+
+def test_generated_demo_bundle_is_rejected_under_any_filename():
+    payload = animation_payload(vrma=True, names=["ПРИВЕТ"])
+    payload["asset"]["generator"] = "make_gestures_vrma.py"
+    with pytest.raises(ClipFormatError, match="заглушек"):
+        parse_animation(glb_bytes(payload), filename="renamed.vrma")
+
+
+def test_placeholder_is_excluded_from_selection_and_file_api(client, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path
+    sign = Sign.objects.create(gloss="ПРИВЕТ", status=SignStatus.VERIFIED)
+    path = tmp_path / "demo.vrma"
+    path.write_bytes(make_glb(vrma=True))
+    fake = SignClip.objects.create(
+        sign=sign, file=path.name, format=ClipFormat.ANIMATION, is_placeholder=True, version=10,
+    )
+    tokens = {"lang": Language.RSL, "tokens": [{"type": "sign", "gloss": "ПРИВЕТ"}]}
+    assert sign.best_clip is None
+    assert clip_refs_for_glosses(tokens) == []
+    assert client.get(fake.file_url()).status_code == 404
+
+    recording = SignClip.objects.create(sign=sign, file="privet.json.gz", frames=35)
+    assert sign.best_clip == recording
+    assert [ref["id"] for ref in clip_refs_for_glosses(tokens)] == [recording.pk]

@@ -7,19 +7,19 @@
  * crossfade 150–250 мс, а между фразами аватар стоит в нейтральной позе (FR-12).
  * Скорость воспроизведения ограничена 0.6–1.3x (FR-13, FR-16).
  *
- * Время идёт **покадрам**: один `tick` — один кадр текущего клипа (как и в C3).
- * Так воспроизведение детерминировано, тесты не зависят от таймера, а crossfade
- * считается в кадрах из миллисекунд (длина перехода делится на длительность
- * кадра). Плавность добавляет блендинг кадров ретаргета (`clip-blend.ts`).
+ * Один `tick` продвигает очередь на кадр клипа. При показе Slovo браузер
+ * интерполирует повороты между этими кадрами с частотой отрисовки.
  */
 
 import type { VRM } from "@pixiv/three-vrm";
 
 import type { DecodedClip } from "./clip";
-import { crossfade, fadeToNeutral, neutralFrame } from "./clip-blend";
+import { crossfade, fadeToNeutral, lerpFrames, neutralFrame } from "./clip-blend";
 import { planQueue, toQueueClip, type CrossfadeMode, type QueuePlan } from "./clip-queue";
 import { OneEuroLandmarks } from "./one-euro";
 import { retargetParts, splitFrame, type RetargetedFrame } from "./retarget";
+import { prepareSlovoMotion } from "./slovo-motion";
+import { retargetSlovo, slovoSpace } from "./slovo-retarget";
 import { applyRetargetedFrame, resetToNeutral } from "./vrm-rig";
 
 export type ClipPlayerOptions = {
@@ -68,6 +68,16 @@ export class ClipPlayer {
   /** Остаток кадров плавного ухода последнего клипа в нейтральную позу. */
   private tailLeft = 0;
   private timer: number | null = null;
+  private animationFrame: number | null = null;
+  private renderFrom = neutralFrame();
+  private renderTo = neutralFrame();
+  private rendered = neutralFrame();
+  private motion: RetargetedFrame[] | null = null;
+  private tailFrames = 0;
+  private gapFadeFrames = 0;
+  private coordinateSpaces: ReturnType<typeof slovoSpace>[] = [];
+  private previous = neutralFrame();
+  private last = neutralFrame();
 
   constructor(vrm: VRM, options: ClipPlayerOptions = {}) {
     this.vrm = vrm;
@@ -91,6 +101,8 @@ export class ClipPlayer {
   loadQueue(clips: DecodedClip[]): void {
     this.stop();
     this.clips = clips;
+    this.coordinateSpaces = clips.map(slovoSpace);
+    this.previous = this.last = this.rendered = neutralFrame();
     this.frameIndex = 0;
     this.clipIndex = 0;
     this.gapLeft = 0;
@@ -130,15 +142,89 @@ export class ClipPlayer {
 
   /** Начать воспроизведение с текущего места. */
   start(): void {
-    if (this.clips.length === 0 || this.timer !== null) return;
+    if (this.clips.length === 0 || this.isPlaying) return;
     const fps = this.options.fps ?? this.clips[0].fps;
     const speed = this.plan?.speed ?? 1;
     const interval = 1000 / (fps * speed);
-    this.timer = globalThis.setInterval(() => this.tick(), interval) as unknown as number;
+    if (this.coordinateSpaces.some(Boolean) && typeof globalThis.requestAnimationFrame === "function") {
+      this.startInterpolated(interval);
+    } else {
+      this.timer = globalThis.setInterval(() => this.tick(), interval) as unknown as number;
+    }
+  }
+
+  /** Между отметками клипа поза обновляется с частотой отрисовки экрана. */
+  private startInterpolated(interval: number): void {
+    let boundary: number | undefined;
+    // Для одиночного клипа нейтраль смешивается с первым кадром до жеста,
+    // чтобы вступление не ослабляло движение в начале записи.
+    let frameDuration = this.clips.length === 1 && this.frameIndex === 0 ? 130 : interval;
+    this.renderFrom = this.renderTo = this.rendered;
+    const step = (): void => {
+      this.renderFrom = this.renderTo;
+      this.tick();
+    };
+    const render = (now: number): void => {
+      const scheduled = this.animationFrame;
+      if (boundary === undefined) {
+        boundary = now;
+        step();
+      } else {
+        if (now - boundary > frameDuration + 4 * interval) {
+          // После скрытой вкладки продолжить жест без мгновенного догона.
+          boundary = now;
+          frameDuration = interval;
+          step();
+        } else {
+          while (now - boundary >= frameDuration && this.animationFrame === scheduled) {
+            boundary += frameDuration;
+            frameDuration = interval;
+            step();
+          }
+        }
+      }
+      if (this.animationFrame !== scheduled) return;
+      const progress = (now - boundary) / frameDuration;
+      this.draw(this.renderFrom === this.renderTo
+        ? this.renderTo
+        : frameDuration === interval
+          ? lerpFrames(this.renderFrom, this.renderTo, progress)
+          : crossfade(this.renderFrom, this.renderTo, progress));
+      this.animationFrame = globalThis.requestAnimationFrame(render);
+    };
+    this.animationFrame = globalThis.requestAnimationFrame(render);
+  }
+
+  private draw(frame: RetargetedFrame): void {
+    this.rendered = frame;
+    if (frame.bones || frame.leftFingers || frame.rightFingers || frame.face) {
+      applyRetargetedFrame(this.vrm, frame);
+    } else {
+      resetToNeutral(this.vrm);
+    }
+  }
+
+  private present(frame: RetargetedFrame): void {
+    if (this.animationFrame === null) {
+      this.draw(frame);
+    } else {
+      this.renderTo = frame;
+    }
+  }
+
+  private edgeFadeFrames(): number {
+    const clip = this.clips[this.clipIndex];
+    return this.animationFrame !== null && this.coordinateSpaces[this.clipIndex]
+      ? Math.max(1, Math.round((this.options.fps ?? clip.fps) * (this.plan?.speed ?? 1) * 0.13))
+      : 0;
   }
 
   /** Остановить воспроизведение (очередь остаётся загруженной). */
   stop(): void {
+    if (this.animationFrame !== null) {
+      globalThis.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
     if (this.timer !== null) {
       globalThis.clearInterval(this.timer);
       this.timer = null;
@@ -198,9 +284,8 @@ export class ClipPlayer {
     // Плавный уход последнего клипа в нейтральную позу (ТЗ 5.4, FR-12).
     if (this.tailLeft > 0) {
       this.tailLeft -= 1;
-      const progress = 1 - this.tailLeft / this.crossfadeFrames;
-      const last = this.retarget(this.clips[this.clipIndex], this.clips[this.clipIndex].frames - 1);
-      applyRetargetedFrame(this.vrm, fadeToNeutral(last, progress));
+      const progress = 1 - this.tailLeft / this.tailFrames;
+      this.present(fadeToNeutral(this.last, progress));
       if (this.tailLeft === 0) this.finish();
       return;
     }
@@ -208,8 +293,14 @@ export class ClipPlayer {
     // Пауза в нейтральной позе между фразами.
     if (this.gapLeft > 0) {
       this.gapLeft -= 1;
-      applyRetargetedFrame(this.vrm, neutralFrame());
-      if (this.gapLeft === 0) this.advanceClip();
+      const elapsed = this.gapFrames - this.gapLeft;
+      this.present(this.gapFadeFrames > 0 && elapsed < this.gapFadeFrames
+        ? fadeToNeutral(this.last, elapsed / this.gapFadeFrames)
+        : neutralFrame());
+      if (this.gapLeft === 0) {
+        this.last = neutralFrame();
+        this.advanceClip();
+      }
       return;
     }
 
@@ -220,17 +311,16 @@ export class ClipPlayer {
         // Пауза в нейтральной позе или сразу следующий клип.
         if (this.gapFrames > 0) {
           this.gapLeft = this.gapFrames;
+          this.gapFadeFrames = Math.min(this.gapFrames, this.edgeFadeFrames());
           return;
         }
         this.advanceClip();
       } else if (this.options.loop) {
         this.restart();
-      } else if (this.crossfadeFrames > 0) {
-        // Последний клип очереди: плавный уход в нейтральную позу.
-        this.tailLeft = this.crossfadeFrames;
-        return;
       } else {
-        this.finish();
+        this.tailFrames = this.crossfadeFrames || this.edgeFadeFrames();
+        if (this.tailFrames > 0) this.tailLeft = this.tailFrames;
+        else this.finish();
         return;
       }
     }
@@ -243,6 +333,8 @@ export class ClipPlayer {
 
   /** Перейти к следующему клипу очереди (сбросить курсор и открыть crossfade). */
   private advanceClip(): void {
+    this.previous = this.last;
+    this.resetSmoothing();
     this.clipIndex += 1;
     this.frameIndex = 0;
     this.options.onClip?.(this.clipIndex);
@@ -255,42 +347,36 @@ export class ClipPlayer {
     this.gapLeft = 0;
     this.tailLeft = 0;
     this.resetSmoothing();
+    this.previous = this.last;
     this.options.onClip?.(0);
   }
 
   /** Завершить очередь: остановиться и вернуть модель в нейтральную позу. */
   private finish(): void {
     this.stop();
-    resetToNeutral(this.vrm);
+    this.draw(neutralFrame());
     this.options.onEnd?.();
   }
 
   /** Показать кадр клипа: сгладить, ретаргетить и смешать с соседним кадром. */
   private showFrame(clip: DecodedClip, frame: number): void {
     const current = this.retarget(clip, frame);
-
-    // Зона входа: смешиваем с последним кадром предыдущего клипа (или с
-    // нейтральной позой для первого клипа очереди — ТЗ 5.4).
-    if (this.crossfadeFrames > 0 && frame < this.crossfadeFrames) {
-      const previous = this.previousFrame();
-      const progress = frame / this.crossfadeFrames;
-      applyRetargetedFrame(this.vrm, crossfade(previous, current, progress));
-      return;
-    }
-    applyRetargetedFrame(this.vrm, current);
-  }
-
-  /** Последний кадр предыдущего клипа (или нейтраль, если его нет). */
-  private previousFrame(): RetargetedFrame {
-    if (this.clipIndex === 0) return neutralFrame();
-    const previous = this.clips[this.clipIndex - 1];
-    return this.retarget(previous, previous.frames - 1);
+    // Сохраняем показанную позу: короткий клип может закончиться ещё в переходе.
+    const fade = Math.min(this.crossfadeFrames, clip.frames - 1);
+    this.last = frame < fade ? crossfade(this.previous, current, frame / fade) : current;
+    this.present(this.last);
   }
 
   /** Отфильтровать landmarks кадра и ретаргетить их в позы. */
   private retarget(clip: DecodedClip, frame: number): RetargetedFrame {
+    const space = this.coordinateSpaces[this.clipIndex];
+    if (space && this.options.smoothing) {
+      this.motion ??= prepareSlovoMotion(this.vrm, clip, space === "legacy");
+      return this.motion[frame];
+    }
     const parts = splitFrame(clip, frame);
-    if (this.options.smoothing) {
+    // Кисти Slovo уже сглажены при конвертации. Второй фильтр ослабит быстрый жест.
+    if (this.options.smoothing && space === null) {
       for (const name of ["pose", "hand_l", "hand_r", "face"] as const) {
         const points = parts[name];
         if (points) {
@@ -304,11 +390,12 @@ export class ClipPlayer {
         }
       }
     }
-    return retargetParts(parts);
+    return space ? retargetSlovo(this.vrm, parts, space === "legacy") : retargetParts(parts);
   }
 
   /** Сбросить фильтры сглаживания (при смене очереди и в цикле). */
   private resetSmoothing(): void {
+    this.motion = null;
     this.smoothing = {
       pose: new OneEuroLandmarks(),
       hand_l: new OneEuroLandmarks(),
@@ -319,7 +406,7 @@ export class ClipPlayer {
 
   /** Идёт ли воспроизведение. */
   get isPlaying(): boolean {
-    return this.timer !== null;
+    return this.timer !== null || this.animationFrame !== null;
   }
 
   /** Текущий кадр внутри текущего клипа (для отладки и тестов). */
@@ -350,6 +437,7 @@ export class ClipPlayer {
   dispose(): void {
     this.stop();
     this.clips = [];
+    this.motion = null;
     this.plan = null;
     this.frameIndex = 0;
     this.clipIndex = 0;

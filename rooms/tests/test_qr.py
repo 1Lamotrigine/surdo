@@ -26,6 +26,16 @@ def test_render_qr_svg_returns_inline_svg():
     assert "<?xml" not in svg
 
 
+def test_render_qr_svg_scales_with_container():
+    """viewBox без width/height: иначе CSS не масштабирует SVG."""
+    svg = render_qr_svg("http://testserver/r/ABC234/")
+
+    assert 'viewBox="' in svg
+    opening = svg[: svg.index(">")]
+    assert "width=" not in opening
+    assert "height=" not in opening
+
+
 def test_room_qr_svg_encodes_short_link(owner, rf):
     room = create_room(owner=owner)
     request = rf.get("/")

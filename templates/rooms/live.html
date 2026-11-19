@@ -6,6 +6,7 @@
 {% block content %}
   <section class="teacher-live" data-room-live data-teacher-view
            data-join-code="{{ room.join_code }}"
+           data-avatar-model-url="{{ avatar_model_url }}"
            data-remove-participant-url="{% url 'rooms:remove-participant' join_code=room.join_code participant_id=0 %}"
            data-csrf-token="{{ csrf_token }}">
     <header class="teacher-live-head">
@@ -50,32 +51,34 @@
       <div class="teacher-live-main">
         {% include "rooms/_microphone.html" %}
         {% include "rooms/_phrase_form.html" %}
-        {% include "rooms/_phrase_feed.html" %}
+        {% include "rooms/_chat.html" %}
       </div>
 
       <div class="teacher-live-side">
         <div class="teacher-monitor">
-          <div class="lag-panel" data-lag-panel data-level="idle" aria-live="polite">
-            <p class="eyebrow">Отставание аватара</p>
-            <p class="lag-value" data-lag-value>Нет данных</p>
-            <p class="lag-hint" data-lag-hint>Ждём первую фразу…</p>
+          {# Преподаватель видит то же, что студент: аватар, жесты и субтитры. #}
+          <div
+            class="teacher-avatar"
+            aria-label="Аватар с показом жестов"
+          >
+            <div class="avatar-stage" data-room-avatar-stage></div>
+            <p class="socket-status" data-avatar-status data-state="loading" aria-live="polite">
+              Загрузка аватара…
+            </p>
+            <p class="teacher-live-caption" data-room-live-caption hidden aria-live="polite"></p>
+            <div
+              class="avatar-subtitles subtitle-size-large subtitle-theme-dark"
+              data-room-subtitles
+              aria-live="polite"
+            ></div>
+            <p class="teacher-phrase-status" data-room-phrase-status aria-live="polite">
+              Ожидание фразы…
+            </p>
           </div>
 
-          <aside class="unknown-panel" aria-labelledby="unknown-title">
-            <h2 id="unknown-title">Слова без жеста</h2>
-            <ul class="unknown-list" data-unknown-words aria-live="polite">
-              {% if latest_unknown_words %}
-                {% for word in latest_unknown_words %}
-                  <li class="unknown-word">{{ word }}</li>
-                {% endfor %}
-              {% else %}
-                <li class="unknown-word-empty">Пока нет.</li>
-              {% endif %}
-            </ul>
-          </aside>
+          {# Лента фраз — прямо под аватаром: видно и жест, и текст (E5). #}
+          {% include "rooms/_phrase_feed.html" %}
         </div>
-
-        {% include "rooms/_chat.html" %}
 
         <aside class="presence-panel" aria-labelledby="presence-title">
           <h2 id="presence-title">В комнате</h2>

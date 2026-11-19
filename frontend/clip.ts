@@ -38,6 +38,7 @@ export type DecodedClip = {
   /** Число компонент на точку (всегда 3). */
   components: number;
   layout: ClipLayout;
+  coordinate_space?: "mediapipe-world";
   /**
    * Landmarks: `frames * points * components` чисел, по кадру за раз
    * (порядок точек — как в `layout`).
@@ -146,6 +147,7 @@ function validatePayload(payload: unknown): {
   fps: number;
   frames: number;
   layout: ClipLayout;
+  coordinate_space?: "mediapipe-world";
   data: string;
 } {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
@@ -196,6 +198,7 @@ function validatePayload(payload: unknown): {
     fps,
     frames,
     layout: layout as ClipLayout,
+    ...(clip.coordinate_space === "mediapipe-world" ? { coordinate_space: clip.coordinate_space } : {}),
     data,
   };
 }
@@ -220,14 +223,14 @@ function computeOffsets(layout: ClipLayout): {
  * Проверяет размер данных: он должен совпадать с `frames * points * 3 * 2`.
  */
 export async function decodeClipPayload(payload: unknown): Promise<DecodedClip> {
-  const { version, gloss, fps, frames, layout, data } = validatePayload(payload);
-  const { offsets, points } = computeOffsets(layout);
+  const { data, ...metadata } = validatePayload(payload);
+  const { offsets, points } = computeOffsets(metadata.layout);
 
   const compressed = base64ToBytes(data);
   const raw = await gunzip(compressed);
   const values = float16ToFloat32(raw);
 
-  const expected = frames * points * COMPONENTS_PER_POINT;
+  const expected = metadata.frames * points * COMPONENTS_PER_POINT;
   if (values.length !== expected) {
     throw new ClipDecodeError(
       `Число значений не совпадает с frames × points × 3: ${values.length} вместо ${expected}.`,
@@ -235,13 +238,9 @@ export async function decodeClipPayload(payload: unknown): Promise<DecodedClip> 
   }
 
   return {
-    version,
-    gloss,
-    fps,
-    frames,
+    ...metadata,
     points,
     components: COMPONENTS_PER_POINT,
-    layout,
     data: values,
     offsets,
   };

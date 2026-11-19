@@ -278,6 +278,11 @@ def create_utterance(
 def recent_room_utterances(
     room: Room, *, limit: int = PHRASE_FEED_LIMIT
 ) -> list[Utterance]:
-    """Последние фразы комнаты по возрастанию ``seq`` для ленты преподавателя."""
+    """Последние фразы комнаты для ленты: свежие сверху.
+
+    Раньше отдавались по возрастанию ``seq`` (старые сверху), но ленту читают
+    с экрана, и первым должно быть только что сказанное — поэтому порядок по
+    убыванию ``seq`` без разворота списка.
+    """
     queryset = Utterance.objects.filter(room=room).order_by("-seq")
-    return list(queryset[: max(1, limit)])[::-1]
+    return list(queryset[: max(1, limit)])

@@ -12,6 +12,8 @@
  * ручной настройки.
  */
 
+import { DEFAULT_AVATAR_SPEED } from "./clip-queue";
+
 /** Тема фона сцены (FR-13). */
 export type StudentTheme = "dark" | "light";
 
@@ -31,7 +33,7 @@ export type StudentSettings = {
 
 /** Настройки по умолчанию: нейтральный кадр и тёмный фон. */
 export const STUDENT_SETTINGS_DEFAULTS: StudentSettings = {
-  speed: 1,
+  speed: DEFAULT_AVATAR_SPEED,
   size: 1,
   offsetX: 0,
   offsetY: 0,

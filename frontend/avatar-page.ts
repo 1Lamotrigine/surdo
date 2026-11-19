@@ -109,7 +109,7 @@ function setupAvatarPage(root: HTMLElement): void {
   const readPlayerOptions = (): { speed: number; gapMs: number } => {
     const settingsSpeed = settingsView?.settings.speed;
     const fieldSpeed = speedInput ? Number.parseFloat(speedInput.value) : Number.NaN;
-    const speed = settingsSpeed ?? (Number.isFinite(fieldSpeed) ? fieldSpeed : 1);
+    const speed = settingsSpeed ?? (Number.isFinite(fieldSpeed) ? fieldSpeed : STUDENT_SETTINGS_DEFAULTS.speed);
     const gapMs = gapInput ? Number.parseFloat(gapInput.value) : 0;
     return { speed, gapMs: Number.isFinite(gapMs) ? gapMs : 0 };
   };

@@ -57,7 +57,7 @@ def _mediapipe_wasm_path() -> str:
 
 
 def _get_clip(clip_id: int) -> SignClip | None:
-    return SignClip.objects.filter(pk=clip_id).first()
+    return SignClip.objects.filter(pk=clip_id, is_placeholder=False).first()
 
 
 def _clip_etag(request: HttpRequest, clip_id: int, ext: str | None = None, **kwargs) -> str | None:

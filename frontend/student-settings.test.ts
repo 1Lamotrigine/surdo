@@ -92,7 +92,7 @@ describe("normalizeStudentSettings", () => {
   it("не мутирует объект умолчаний", () => {
     normalizeStudentSettings({ speed: 0.6, theme: "light" });
     expect(STUDENT_SETTINGS_DEFAULTS).toEqual({
-      speed: 1,
+      speed: 0.7,
       size: 1,
       offsetX: 0,
       offsetY: 0,

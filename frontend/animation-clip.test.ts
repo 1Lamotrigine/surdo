@@ -15,9 +15,11 @@ import {
   glbJson,
   isVrmaJson,
   loadAnimationBundle,
+  nameVrmaClips,
   pickAnimationClip,
   type AnimationBundle,
 } from "./animation-clip";
+import type { AnimationClip } from "three";
 
 const GLB_MAGIC = 0x46546c67;
 const JSON_CHUNK = 0x4e4f534a;
@@ -105,8 +107,35 @@ describe("pickAnimationClip", () => {
   });
 });
 
+describe("nameVrmaClips", () => {
+  const clip = (name: string) => ({ name, tracks: [] }) as unknown as AnimationClip;
+
+  it("переносит имена записей glTF в клипы", () => {
+    const clips = nameVrmaClips(
+      [clip("Clip"), clip("Clip")],
+      ["ПРИВЕТ", "СПАСИБО"],
+    );
+    expect(clips.map((c) => c.name)).toEqual(["ПРИВЕТ", "СПАСИБО"]);
+  });
+
+  it("не трогает имя, если в glTF его нет", () => {
+    const clips = nameVrmaClips([clip("Clip")], [undefined]);
+    expect(clips[0].name).toBe("Clip");
+  });
+
+  it("после переноса имён выбор по имени находит нужный жест", () => {
+    const bundle = {
+      clips: nameVrmaClips([clip("Clip"), clip("Clip")], ["ПРИВЕТ", "СТОП"]),
+      vrma: true,
+      url: "https://example.test/g.vrma",
+    } as unknown as AnimationBundle;
+    expect(pickAnimationClip(bundle, "СТОП")?.name).toBe("СТОП");
+    expect(pickAnimationClip(bundle, "НЕТ_ТАКОГО")).toBeNull();
+  });
+});
+
 describe("loadAnimationBundle", () => {
-  it("на VRMA сообщает о неподключённом пакете", async () => {
+  it("на VRMA без модели сообщает, что нужна VRM", async () => {
     const buffer = glb(payload({ extensionsUsed: ["VRMC_vrm_animation"] }));
     await expect(
       loadAnimationBundle("https://example.test/a.vrma", { fetcher: async () => buffer }),

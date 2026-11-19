@@ -278,3 +278,15 @@ describe("размер и контраст", () => {
     expect(SUBTITLE_THEMES).toContain("dark");
   });
 });
+
+it("подсвечивает многословный жест целиком и сохраняет границу следующего токена", () => {
+  const utterance = {
+    text: "Две недели, затем 7:45.",
+    tokens: [
+      { type: "sign" as const, src: "Две недели", gloss: "ДВЕ НЕДЕЛИ" },
+      { type: "sign" as const, src: "затем", gloss: "ЗАТЕМ" },
+      { type: "sign" as const, src: "7:45", gloss: "7:45" },
+    ],
+  };
+  expect(alignTokens(utterance).map(({ text }) => text)).toEqual(["Две недели", "затем", "7:45"]);
+});

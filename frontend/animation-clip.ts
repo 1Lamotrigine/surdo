@@ -7,12 +7,17 @@
  * `GLTFLoader` и играет `AnimationMixer`-ом (`animation-player.ts`).
  *
  * VRMA (`.vrma`) — GLB с расширением `VRMC_vrm_animation`: дорожки адресуют
- * гуманоидные кости VRM, а не узлы конкретной модели. Для него нужен
- * `@pixiv/three-vrm-animation`; пакет пока не подключён, поэтому загрузчик
- * честно сообщает об этом (`VrmaNotSupportedError`), а не падает молча.
- * Подключение — один шаг, см. `docs/ANIMATIONS.md`, раздел «VRMA».
+ * гуманоидные кости VRM, а не узлы конкретной модели. Такие файлы грузятся
+ * через `VRMAnimationLoaderPlugin` из `@pixiv/three-vrm-animation`, который
+ * кладёт разобранные записи в `gltf.userData.vrmAnimations`. Затем
+ * `createVRMAnimationClip` разворачивает их в `AnimationClip` уже **под
+ * конкретную модель** — поэтому для VRMA в загрузчик передаётся `vrm`.
  */
 
+import type { VRM } from "@pixiv/three-vrm";
+import { createVRMAnimationClip } from "@pixiv/three-vrm-animation";
+import { VRMAnimationLoaderPlugin } from "@pixiv/three-vrm-animation";
+import type { VRMAnimation } from "@pixiv/three-vrm-animation";
 import type { AnimationClip } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -34,12 +39,12 @@ export class AnimationFormatError extends Error {
   }
 }
 
-/** Файл — VRMA, но пакет `@pixiv/three-vrm-animation` не подключён. */
+/** Файл — VRMA, но модель для ретаргета не передана. */
 export class VrmaNotSupportedError extends AnimationFormatError {
   constructor() {
     super(
-      "Клип VRMA требует пакета @pixiv/three-vrm-animation. " +
-        "Подключите его и включите VRMAnimationLoaderPlugin (docs/ANIMATIONS.md).",
+      "Клип VRMA нужно разворачивать под конкретную VRM-модель: " +
+        "передайте `vrm` в loadAnimationBundle (см. room-phrase.ts).",
     );
     this.name = "VrmaNotSupportedError";
   }
@@ -140,28 +145,68 @@ async function fetchBytes(url: string): Promise<ArrayBuffer> {
 }
 
 /**
+ * Перенести имена записей glTF в клипы VRM.
+ *
+ * `createVRMAnimationClip` из three-vrm всегда называет клип "Clip" и теряет
+ * имя записи. В файле с несколькими анимациями (жест = именованная запись)
+ * выбор по имени (`pickAnimationClip`) без этого не работает. Порядок
+ * `vrmAnimations` совпадает с `gltf.animations`.
+ */
+export function nameVrmaClips(
+  clips: AnimationClip[],
+  names: ReadonlyArray<string | undefined>,
+): AnimationClip[] {
+  clips.forEach((clip, index) => {
+    const name = names[index];
+    if (name) clip.name = name;
+  });
+  return clips;
+}
+
+/**
  * Загрузить один файл анимации и вернуть дорожки для `AnimationMixer`.
  *
- * Сейчас поддерживается обычный GLB с анимациями на узлах модели. VRMA
- * распознаётся и даёт понятную ошибку до подключения пакета ретаргета.
+ * Обычный GLB содержит анимации на узлах модели и разбирается как есть. VRMA
+ * адресует гуманоидные кости (`VRMC_vrm_animation`), поэтому его нужно
+ * развернуть под конкретную модель: вызовите с `vrm` (моделью страницы).
+ * Без `vrm` на VRMA бросается `VrmaNotSupportedError` — лучше понятная ошибка,
+ * чем жест, сыгранный на чужих костях.
  */
 export async function loadAnimationBundle(
   url: string,
-  options: { fetcher?: AnimationFetcher } = {},
+  options: { fetcher?: AnimationFetcher; vrm?: VRM | null } = {},
 ): Promise<AnimationBundle> {
   const fetcher = options.fetcher ?? fetchBytes;
   const buffer = await fetcher(url);
   const payload = jsonFromGlb(buffer);
   const vrma = isVrmaJson(payload);
-  if (vrma) {
-    throw new VrmaNotSupportedError();
-  }
   if (animationCount(payload) === 0) {
     throw new AnimationFormatError("В файле анимации нет ни одной анимации.");
   }
 
   const basePath = url.slice(0, url.lastIndexOf("/") + 1);
-  const gltf = await new GLTFLoader().parseAsync(buffer, basePath);
+  const loader = new GLTFLoader();
+  if (vrma) {
+    if (!options.vrm) {
+      throw new VrmaNotSupportedError();
+    }
+    loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+  }
+  const gltf = await loader.parseAsync(buffer, basePath);
+
+  if (vrma) {
+    const vrm = options.vrm as VRM;
+    const animations = (gltf.userData.vrmAnimations as VRMAnimation[] | undefined) ?? [];
+    const clips = nameVrmaClips(
+      animations.map((animation) => createVRMAnimationClip(animation, vrm)),
+      gltf.animations.map((clip) => clip.name),
+    ).filter((clip) => clip.tracks.length > 0);
+    if (clips.length === 0) {
+      throw new AnimationFormatError("VRMA не дал ни одной дорожки для этой модели.");
+    }
+    return { clips, vrma, url };
+  }
+
   if (gltf.animations.length === 0) {
     throw new AnimationFormatError("GLTFLoader не нашёл анимаций в файле.");
   }

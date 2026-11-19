@@ -21,13 +21,17 @@ type FakeVrm = {
 };
 
 /** Собрать заглушку VRM с костями и выражениями. */
-function makeFakeVrm(boneNames: string[]): FakeVrm {
+function makeFakeVrm(boneNames: string[], hipsRestY = 1.04): FakeVrm {
   const bones = new Map<string, THREE.Object3D>();
   for (const name of boneNames) {
     const node = new THREE.Object3D();
     node.name = name;
     bones.set(name, node);
   }
+  // Как у настоящего VRM в нормализованном риге: узел `hips` стоит на мировой
+  // высоте бёдер (~1.04), а не в начале координат.
+  const hipsNode = bones.get("hips");
+  if (hipsNode) hipsNode.position.set(0, hipsRestY, 0);
 
   const expressions = new Map<string, number>();
   const state = { resetPoseCalls: 0 };
@@ -37,7 +41,18 @@ function makeFakeVrm(boneNames: string[]): FakeVrm {
     setNormalizedPose: () => {
       state.resetPoseCalls += 1;
     },
-    normalizedRestPose: {},
+    // Реальный API three-vrm: нейтраль ставит именно сброс нормализованной
+    // позы (см. комментарий в vrm-rig.ts).
+    resetNormalizedPose: () => {
+      state.resetPoseCalls += 1;
+      const hips = bones.get("hips");
+      if (hips) hips.position.set(0, hipsRestY, 0);
+    },
+    // Узел `hips` нормализованного рига стоит на абсолютной высоте, и rest
+    // pose хранит именно её — как у настоящего VRM.
+    normalizedRestPose: {
+      hips: { position: [0, hipsRestY, 0], rotation: [0, 0, 0, 1] },
+    },
   };
 
   const expressionManager = {
@@ -112,14 +127,43 @@ describe("applyRetargetedFrame", () => {
     expect(upperArm.rotation.x).toBeCloseTo(0.5, 6);
   });
 
-  it("переносит позицию бёдер (в уменьшенном масштабе)", () => {
+  it("переносит позицию бёдер как смещение от rest-высоты", () => {
     const fake = makeFakeVrm(ALL_BONES);
 
     applyRetargetedFrame(fake.vrm, frameWithBones());
 
     const hips = fake.bones.get("hips")!;
+    // Rest-высота бёдер сохраняется, сверху идёт небольшое смещение.
     expect(hips.position.x).toBeCloseTo(0.02, 6);
-    expect(hips.position.y).toBeCloseTo(-0.01, 6);
+    expect(hips.position.y).toBeCloseTo(1.04 - 0.01, 6);
+  });
+
+  it("не роняет модель вниз: бёдра остаются на rest-высоте", () => {
+    const fake = makeFakeVrm(ALL_BONES);
+    const restY = fake.bones.get("hips")!.position.y;
+    expect(restY).toBeGreaterThan(1);
+
+    // Кадр Slovo: Hips.position.y от Kalidokit всегда 0, x ≈ -0.5.
+    const frame = frameWithBones();
+    frame.bones!.Hips = { position: { x: -0.5, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } };
+
+    applyRetargetedFrame(fake.vrm, frame);
+
+    const hips = fake.bones.get("hips")!;
+    // Главное: высота бёдер не обнуляется — иначе модель «телепортируется»
+    // вниз и из кадра видно только голову.
+    expect(hips.position.y).toBeCloseTo(restY, 6);
+    expect(hips.position.y).toBeGreaterThan(0.5);
+  });
+
+  it("поворачивает бёдра из кадра ретаргета", () => {
+    const fake = makeFakeVrm(ALL_BONES);
+    const frame = frameWithBones();
+    frame.bones!.Hips.rotation = { x: 0, y: 0.25, z: 0 };
+
+    applyRetargetedFrame(fake.vrm, frame);
+
+    expect(fake.bones.get("hips")!.rotation.y).toBeCloseTo(0.25, 6);
   });
 
   it("раскладывает пальцы по костям кистей", () => {
@@ -218,5 +262,22 @@ describe("resetToNeutral", () => {
     expect(fake.expressions.get("aa")).toBe(0);
     expect(fake.expressions.get("blinkLeft")).toBe(0);
     expect(fake.expressions.get("ou")).toBe(0);
+  });
+
+  it("опускает руки вниз, а не оставляет T-позу", () => {
+    const fake = makeFakeVrm(ALL_BONES);
+    // До нейтрали руки стоят в T-позе (нулевой поворот).
+    expect(fake.bones.get("rightUpperArm")!.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0);
+
+    resetToNeutral(fake.vrm);
+
+    // Плечи повёрнуты, и обе руки смотрят вниз. Правая кость направлена по
+    // -X, левая — по +X (зеркально в T-позе), поэтому проверяем свой вектор.
+    const right = fake.bones.get("rightUpperArm")!.quaternion;
+    const left = fake.bones.get("leftUpperArm")!.quaternion;
+    const rightArm = new THREE.Vector3(-1, 0, 0).applyQuaternion(right);
+    const leftArm = new THREE.Vector3(1, 0, 0).applyQuaternion(left);
+    expect(rightArm.y).toBeLessThan(-0.5); // правое плечо смотрит вниз
+    expect(leftArm.y).toBeLessThan(-0.5); // левое плечо смотрит вниз
   });
 });

@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
+from services.morphology import gloss_text_units
+
 # Русский алфавит дактиля — совпадает с frontend/dactyl.ts (33 буквы).
 DACTYL_ALPHABET = (
     "А", "Б", "В", "Г", "Д", "Е", "Ё", "Ж", "З", "И", "Й", "К", "Л", "М", "Н",
@@ -90,12 +92,12 @@ def build_simplified_glosses(
     tokens: list[dict] = []
     unknown: list[str] = []
 
-    for word in split_words(text):
-        if word.isdigit():
+    for word, phrase in gloss_text_units(text, dictionary.values()):
+        if phrase is None and word.isdigit():
             tokens.append({"type": "number", "value": int(word), "src": word})
             continue
 
-        gloss = dictionary.get(normalize_word(word))
+        gloss = phrase or dictionary.get(normalize_word(word))
         if gloss is not None:
             tokens.append(
                 {

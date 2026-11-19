@@ -10,6 +10,8 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 
+import { resetToNeutral } from "./vrm-rig";
+
 export type AvatarStatus = "loading" | "ready" | "error";
 
 export type AvatarOptions = {
@@ -23,10 +25,17 @@ export type AvatarOptions = {
   onStatus?: (status: AvatarStatus, detail?: string) => void;
 };
 
-// Нейтральная поза: VRM стоит с опущенными руками (rest pose самой модели),
-// поза включается при загрузке и между клипами (ТЗ 5.4).
+// Нейтральная поза: руки вниз задаёт `resetToNeutral` (см. `vrm-rig`).
 
 const DEFAULT_BACKGROUND: THREE.ColorRepresentation = 0x111827;
+
+// Кадр камеры: показываем от бёдер до макушки — ноги в жестах не участвуют.
+// Рост человека ≈ 1.81 м, бедро — примерно на 0.52 роста; кадр начинается чуть
+// ниже бедра, чтобы жест «от бедра» не обрезался. Запас сверху — на поднятую
+// в махе руку (≈111% роста).
+const FRAME_BOTTOM_RATIO = 0.45;
+const FRAME_TOP_RATIO = 1.12;
+const ARM_SPAN_RATIO = 0.7;
 
 /**
  * 3D-аватар в браузере (WebGL, без установки — FR-11).
@@ -61,7 +70,8 @@ export class Avatar {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(options.background ?? DEFAULT_BACKGROUND);
 
-    // Камера смотрит на аватар по грудь: нижняя треть кадра — свободное место.
+    // Камера настраивается под модель в `frameCamera` (кадр от бёдер до
+    // макушки); значения ниже — только стартовая позиция до загрузки VRM.
     this.camera = new THREE.PerspectiveCamera(
       30,
       (this.container.clientWidth || 640) / (this.container.clientHeight || 480),
@@ -151,21 +161,49 @@ export class Avatar {
     this.scene.background = new THREE.Color(background);
   }
 
-  /** Поставить модель в нейтральную позу (rest pose самой модели). */
+  /**
+   * Поставить модель в нейтральную позу: руки вниз (не T-поза) и нулевая
+   * мимика. Именно `resetNormalizedPose()` внутри `resetToNeutral`, а не
+   * `setNormalizedPose(normalizedRestPose)`: последний принимает трансформы
+   * **относительно** rest pose, и передача в него самого rest pose задваивает
+   * трансляции — модель вырастает вдвое и «улетает» вверх.
+   */
   setNeutralPose(vrm: VRM | null = this.vrm): void {
     if (!vrm) return;
-    vrm.humanoid.setNormalizedPose(vrm.humanoid.normalizedRestPose);
+    resetToNeutral(vrm);
   }
 
-  /** Подогнать камеру под рост модели: кадр «по грудь». */
+  /**
+   * Подогнать камеру под жест: в кадр входят бёдра, торс и **поднятые руки**.
+   *
+   * Жесты показываются руками, ноги в них не участвуют, поэтому кадр обрезан
+   * снизу примерно по бедру, а сверху идёт с запасом: рука, поднятая в махе,
+   * доходит примерно до 1.1 роста — выше макушки. Так голова и руки занимают
+   * больше экрана и жест читается лучше, чем в кадре «в полный рост».
+   */
   private frameCamera(vrm: VRM): void {
     const box = new THREE.Box3().setFromObject(vrm.scene);
     if (box.isEmpty()) return;
 
     const height = box.max.y - box.min.y;
-    const eyeY = box.min.y + height * 0.82;
-    this.camera.position.set(0, eyeY + height * 0.02, height * 1.35);
-    this.camera.lookAt(0, eyeY - height * 0.08, 0);
+    // Границы кадра в мировых координатах: от бедра до запаса над макушкой.
+    const bottom = box.min.y + height * FRAME_BOTTOM_RATIO;
+    const top = box.min.y + height * FRAME_TOP_RATIO;
+    const targetHeight = top - bottom;
+    const centerY = (top + bottom) / 2;
+
+    const fovRad = THREE.MathUtils.degToRad(this.camera.fov);
+    // Дистанция по вертикали: в кадр входит выбранная часть модели.
+    let distance = targetHeight / (2 * Math.tan(fovRad / 2));
+    // Плюс проверка по горизонтали: руки в стороны не должны упираться в края.
+    const armWidth = height * ARM_SPAN_RATIO;
+    const halfHRad = Math.atan(Math.tan(fovRad / 2) * this.camera.aspect);
+    const distanceForWidth = armWidth / (2 * Math.tan(halfHRad));
+    distance = Math.max(distance, distanceForWidth);
+    distance *= 1.08;
+
+    this.camera.position.set(0, centerY, distance);
+    this.camera.lookAt(0, centerY, 0);
   }
 
   private startLoop(): void {
@@ -187,6 +225,8 @@ export class Avatar {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+    // Кадр зависит от соотношения сторон (портрет/ландшафт) — пересобираем.
+    if (this.vrm) this.frameCamera(this.vrm);
   };
 
   /** Освободить ресурсы: цикл, слушатели, WebGL-контекст и модель. */

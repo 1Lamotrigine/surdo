@@ -86,10 +86,12 @@ def test_short_wav_is_transcribed_and_model_is_loaded_once():
     assert second == first
     assert provider.model_loaded is True
     assert len(created) == 1
+    # `cpu_threads` передаётся всегда: CTranslate2 иначе берёт один поток.
     assert created[0] == {
         "name": "tiny",
         "device": "cpu",
         "compute_type": "int8",
+        "cpu_threads": provider.cpu_threads,
     }
     assert len(model.calls) == 2
     assert model.calls[0]["audio"] == wav
@@ -97,6 +99,8 @@ def test_short_wav_is_transcribed_and_model_is_loaded_once():
     assert model.calls[1]["language"] == "ru"
     assert model.calls[0]["vad_filter"] is False
     assert model.calls[0]["condition_on_previous_text"] is False
+    # Жадное декодирование: задержка важнее доли процента точности.
+    assert model.calls[0]["beam_size"] == 1
 
 
 def test_model_factory_is_called_once_under_parallel_first_calls():
@@ -154,6 +158,49 @@ def test_unsupported_language_is_rejected(lang):
 
     with pytest.raises(AsrValidationError, match="не поддерживается"):
         provider.transcribe(short_wav(), lang)
+
+
+def test_provider_warm_up_loads_model_once():
+    """F5: прогрев загружает модель, но не распознаёт аудио."""
+    model = FakeWhisperModel()
+    factory, created = factory_for(model)
+    provider = FasterWhisperProvider(model_size="tiny", model_factory=factory)
+
+    provider.warm_up()
+    provider.warm_up()
+
+    assert provider.model_loaded is True
+    assert len(created) == 1
+    assert model.calls == []
+
+
+def test_service_warm_up_uses_provider_and_tolerates_plain_provider():
+    """Сервис прогревает провайдер, если тот это умеет."""
+
+    class WarmProvider:
+        def __init__(self) -> None:
+            self.warmed = 0
+
+        def warm_up(self) -> None:
+            self.warmed += 1
+
+        def transcribe(self, audio: bytes, lang: str) -> AsrResult:
+            return AsrResult(text="", duration_ms=0, language=lang)
+
+    provider = WarmProvider()
+    service = AsrService(provider=provider, max_concurrency=1)
+    try:
+        assert service.warm_up(timeout=2) is True
+        assert provider.warmed == 1
+    finally:
+        service.close()
+
+    # Провайдер без warm_up не считается ошибкой: грузить нечего.
+    plain = AsrService(provider=TrackingProvider(delay=0), max_concurrency=1)
+    try:
+        assert plain.warm_up(timeout=2) is False
+    finally:
+        plain.close()
 
 
 def test_whisper_failure_is_wrapped_as_asr_error():

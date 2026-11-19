@@ -14,11 +14,18 @@ def build_join_url(request, join_code: str) -> str:
 
 
 def render_qr_svg(content: str) -> str:
-    """Вернуть inline SVG с QR-кодом для вставки в шаблон."""
+    """Вернуть inline SVG с QR-кодом для вставки в шаблон.
+
+    ``omitsize=True`` убирает жёсткие ``width``/``height`` и добавляет
+    ``viewBox``: без него SVG не масштабируется по CSS (``width: 100%`` менял
+    только область просмотра), поэтому код оставался 198 px и обрезался или
+    не совпадал с контейнером, в том числе в крупном режиме.
+    """
     qr = segno.make(content, error="m")
     return qr.svg_inline(
         scale=6,
         border=2,
+        omitsize=True,
         dark="#111827",
         light="#ffffff",
     )

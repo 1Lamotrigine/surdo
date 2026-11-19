@@ -62,8 +62,8 @@ def list_signs(*, lang: str | None = None, status: str = PUBLIC_STATUS) -> list[
 
 def sign_payload(sign: Sign, *, include_unverified_clip: bool = False) -> dict:
     """Представление жеста для HTTP API: глосса, статус и ссылки на клипы."""
-    clips = [clip for clip in sign.clips.all()]
-    best = sign.best_clip
+    clips = [clip for clip in sign.clips.all() if not clip.is_placeholder]
+    best = SignClip.best_of(clips)
     payload = {
         "id": sign.pk,
         "gloss": sign.gloss,
@@ -257,6 +257,13 @@ def transition_sign(
             if required == ROLE_EXPERT
             else "Отправлять жесты на проверку может только редактор словаря."
         )
+
+    if (
+        to_status == SignStatus.VERIFIED
+        and sign.best_clip is None
+        and sign.clips.filter(is_placeholder=True).exists()
+    ):
+        raise SignValidationError("Перед утверждением добавьте запись настоящего жеста.")
 
     with transaction.atomic():
         _apply_status(sign, to_status=to_status, actor=actor, comment=comment)

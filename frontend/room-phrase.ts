@@ -9,6 +9,7 @@ import { loadAnimationBundle, pickAnimationClip, type AnimationBundle } from "./
 import { AnimationPlayer, animationCrossfadeMs, type AnimationQueueItem } from "./animation-player";
 import { decodeClip } from "./clip";
 import { ClipPlayer } from "./clip-player";
+import { DEFAULT_AVATAR_SPEED, clampSpeed } from "./clip-queue";
 import {
   DEFAULT_PLAYBACK_POLICY,
   effectivePlaybackSpeed,
@@ -63,11 +64,14 @@ export class RoomPhrasePlayer {
   private animationPlayer: AnimationPlayer | null = null;
   /** Кэш файлов анимаций: один GLB может содержать несколько жестов (H1). */
   private animationBundles = new Map<string, Promise<AnimationBundle>>();
+  /** Идентификаторы моделей для ключа кэша VRMA-анимаций. */
+  private modelKeys = new WeakMap<object, string>();
+  private modelKeyCounter = 0;
   private activeResolve: (() => void) | null = null;
   private disposed = false;
 
   constructor(root: HTMLElement, options: RoomPhraseOptions = {}) {
-    this.baseSpeed = Math.min(1.3, Math.max(0.6, options.speed ?? 1));
+    this.baseSpeed = clampSpeed(options.speed ?? DEFAULT_AVATAR_SPEED);
     this.onDisplayStarted = options.onDisplayStarted;
     this.status = root.querySelector<HTMLElement>("[data-room-phrase-status]");
 
@@ -276,14 +280,27 @@ export class RoomPhrasePlayer {
   }
 
   /** Загрузить файл анимации один раз, даже если из него идут разные жесты. */
-  private loadAnimation(url: string): Promise<AnimationBundle> {
-    let pending = this.animationBundles.get(url);
+  private loadAnimation(url: string, vrm: Avatar["model"]): Promise<AnimationBundle> {
+    // VRMA разворачивается под конкретную модель, поэтому кэш ключуется парой
+    // «URL + модель»: при смене VRM старые бандлы не переиспользуются.
+    const key = vrm ? `${url}#${this.modelKey(vrm)}` : url;
+    let pending = this.animationBundles.get(key);
     if (!pending) {
-      pending = loadAnimationBundle(url);
-      this.animationBundles.set(url, pending);
-      pending.catch(() => this.animationBundles.delete(url));
+      pending = loadAnimationBundle(url, { vrm });
+      this.animationBundles.set(key, pending);
+      pending.catch(() => this.animationBundles.delete(key));
     }
     return pending;
+  }
+
+  /** Идентификатор модели для ключа кэша анимаций (VRMA зависит от неё). */
+  private modelKey(vrm: NonNullable<Avatar["model"]>): string {
+    let key = this.modelKeys.get(vrm);
+    if (!key) {
+      key = `vrm-${++this.modelKeyCounter}`;
+      this.modelKeys.set(vrm, key);
+    }
+    return key;
   }
 
   /** Показать фразу из готовых анимаций (H1) через `AnimationMixer`. */
@@ -296,7 +313,7 @@ export class RoomPhrasePlayer {
     const items: (AnimationQueueItem | null)[] = await Promise.all(
       refs.map(async (ref) => {
         try {
-          const bundle = await this.loadAnimation(ref.url);
+          const bundle = await this.loadAnimation(ref.url, vrm);
           const clip = pickAnimationClip(bundle, ref.animation_name);
           if (!clip) {
             this.setStatus(
@@ -387,10 +404,10 @@ export function createRoomPhrasePlayer(
   options: Pick<RoomPhraseOptions, "onDisplayStarted"> = {},
 ): RoomPhrasePlayer {
   const modelUrl = root.dataset.avatarModelUrl || undefined;
-  const speed = Number(root.dataset.avatarSpeed ?? "1");
+  const speed = Number(root.dataset.avatarSpeed ?? DEFAULT_AVATAR_SPEED);
   return new RoomPhrasePlayer(root, {
     modelUrl,
-    speed: Number.isFinite(speed) ? speed : 1,
+    speed: Number.isFinite(speed) ? speed : undefined,
     onDisplayStarted: options.onDisplayStarted,
   });
 }

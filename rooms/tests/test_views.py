@@ -135,6 +135,53 @@ def test_live_page_marks_teacher_view_and_remove_url(client, owner):
     assert "data-csrf-token" in html
 
 
+def test_teacher_live_page_shows_avatar_stage_and_model(client, owner, settings):
+    """Преподаватель видит ту же сцену аватара, что и студент (E3)."""
+    settings.AVATAR_MODEL_URL = "/media/avatar/surd.vrm"
+    room = Room.objects.create(owner=owner, join_code="LIVE05")
+    client.force_login(owner)
+
+    html = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code})).content.decode()
+
+    assert "data-room-avatar-stage" in html
+    assert "data-room-subtitles" in html
+    assert "data-room-phrase-status" in html
+    assert 'data-avatar-model-url="/media/avatar/surd.vrm"' in html
+
+
+def test_teacher_phrase_feed_sits_right_under_avatar(client, owner, settings):
+    """Лента фраз идёт сразу под аватаром: видно и жест, и текст (E5)."""
+    settings.AVATAR_MODEL_URL = "/media/avatar/surd.vrm"
+    room = Room.objects.create(owner=owner, join_code="LIVE06")
+    client.force_login(owner)
+
+    html = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code})).content.decode()
+
+    avatar = html.index("data-room-avatar-stage")
+    feed = html.index("data-phrase-feed")
+    presence = html.index("data-presence-list")
+    # Сцена аватара, затем сразу лента фраз, и уже потом участники комнаты.
+    assert avatar < feed < presence
+    # Панели «Отставание аватара» и «Слова без жеста» из панели убраны.
+    assert "data-lag-panel" not in html
+    assert "data-unknown-words" not in html
+
+
+def test_teacher_chat_lives_in_main_column(client, owner):
+    """Чат — в левой колонке с формой: писать не пролистывая страницу."""
+    room = Room.objects.create(owner=owner, join_code="LIVE07")
+    client.force_login(owner)
+
+    html = client.get(reverse("rooms:live", kwargs={"join_code": room.join_code})).content.decode()
+
+    # Чат идёт после формы фразы, но до сцены аватара: на узком экране (одна
+    # колонка) он оказывается выше аватара и ленты, писать не пролистывая.
+    chat = html.index("data-chat-log")
+    assert html.index('name="text"') < chat
+    assert chat < html.index("data-room-avatar-stage")
+    assert chat < html.index("data-phrase-feed")
+
+
 def test_closed_room_detail_hides_management_actions(client, owner):
     room = Room.objects.create(owner=owner, join_code="CLOSED")
     room.close()
@@ -166,7 +213,7 @@ def test_teacher_live_requires_login(client, owner):
     assert reverse("accounts:login") in response.url
 
 
-def test_teacher_live_shows_phrase_form_feed_and_unknown_words(client, owner):
+def test_teacher_live_shows_phrase_form_and_feed(client, owner):
     room = Room.objects.create(owner=owner, join_code="LIVE05")
     Utterance.objects.create(
         room=room,
@@ -234,7 +281,8 @@ def test_phrase_feed_returns_latest_room_phrases(client, owner):
     assert "Фраза 2" in html
     assert "Фраза 3" in html
     assert "Чужая фраза" not in html
-    assert html.index("Фраза 1") < html.index("Фраза 3")
+    # Свежие фразы сверху: последняя сказанная идёт первой в ленте.
+    assert html.index("Фраза 3") < html.index("Фраза 1")
 
 
 def test_phrase_form_htmx_queues_text_and_returns_fragment(client, owner, monkeypatch):

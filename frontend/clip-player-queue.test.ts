@@ -37,6 +37,9 @@ function makeFakeVrm(): {
       setNormalizedPose: () => {
         resets += 1;
       },
+      resetNormalizedPose: () => {
+        resets += 1;
+      },
       normalizedRestPose: {},
     },
     expressionManager: {

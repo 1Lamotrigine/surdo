@@ -145,20 +145,27 @@ export function setupRoomLive(root: HTMLElement): void {
   };
 
   /**
-   * Тяжёлый аватар/плеер грузится только на странице студента и только когда
-   * пришла первая фраза. До этого субтитры `asr_text` показывает room-live.
+   * Тяжёлый аватар/плеер грузится на странице, где есть сцена аватара: у
+   * студента и на панели преподавателя. Загружается сразу при входе (модель
+   * видна до первой фразы), а субтитры `asr_text` показывает room-live. Промис
+   * кэшируется: повторные вызовы не грузят модель заново.
+   *
+   * Метрику отставания (E4) шлёт только студент: у преподавателя показ лишь
+   * зеркалит то, что видит студент, и не должен портить `display_lag_ms`.
    */
   const getPhrasePlayer = (): Promise<PhraseController> | null => {
-    if (!isStudentView || !root.querySelector("[data-room-avatar-stage]")) return null;
+    if (!root.querySelector("[data-room-avatar-stage]")) return null;
     phrasePlayer ??= import("./room-phrase")
       .then((module) =>
         module.createRoomPhrasePlayer(root, {
-          onDisplayStarted: (utterance) => sendDisplayStarted(utterance),
+          onDisplayStarted: isStudentView
+            ? (utterance) => sendDisplayStarted(utterance)
+            : undefined,
         }),
       )
       .catch((error: unknown) => {
         phrasePlayer = null;
-        setStatus("Не удалось загрузить аватар: показываем субтитры.", "error");
+        setAvatarStatus("Не удалось загрузить аватар: показываем субтитры.", "error");
         throw error;
       });
     return phrasePlayer;
@@ -277,6 +284,15 @@ export function setupRoomLive(root: HTMLElement): void {
     }
   };
 
+  /** Статус области аватара (если разметка её содержит). */
+  const avatarStatus = root.querySelector<HTMLElement>("[data-avatar-status]");
+  const setAvatarStatus = (text: string, state: "loading" | "ready" | "error"): void => {
+    if (avatarStatus) {
+      avatarStatus.textContent = text;
+      avatarStatus.dataset.state = state;
+    }
+  };
+
   const removeParticipant = (participantId: number): void => {
     if (!removeParticipantUrl) return;
     const form = document.createElement("form");
@@ -367,7 +383,8 @@ export function setupRoomLive(root: HTMLElement): void {
         .sort((left, right) => left.seq - right.seq);
       for (const utterance of missed) {
         lastSeq = utterance.seq;
-        // C8: пропущенные фразы догружаем и в ленту, чтобы можно было прочитать.
+        // Лента расшифровки есть только на панели преподавателя; у студента
+        // `transcript` равен null и вызов пропускается.
         transcript?.push({ seq: utterance.seq, text: utterance.text });
         getPhrasePlayer()
           ?.then((player) => {
@@ -505,6 +522,11 @@ export function setupRoomLive(root: HTMLElement): void {
     },
     { once: true },
   );
+
+  // Студент видит аватара сразу, не дожидаясь первой фразы: иначе область
+  // пустует и непонятно, работает ли показ. Промис сохраняется, поэтому первая
+  // фраза переиспользует уже загруженную модель.
+  void getPhrasePlayer();
 
   connect();
 }

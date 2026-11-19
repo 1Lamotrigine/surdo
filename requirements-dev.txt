@@ -3,3 +3,6 @@ daphne==4.2.3
 pytest==9.1.1
 pytest-django==4.14.0
 ruff==0.17.3
+# Офлайн-конвертация видео Slovo в клипы landmarks (scripts/slovo_to_clips.py).
+# Только для разработки и импорта: в production-образ не попадает.
+mediapipe==1.2.2

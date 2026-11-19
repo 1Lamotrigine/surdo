@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -77,6 +78,44 @@ def lemmatize_words(words) -> list[str]:
 def split_words(text: str) -> list[str]:
     """Слова текста (буквы и цифры) по порядку, без пунктуации."""
     return [match.group(0) for match in _WORD_RE.finditer(text or "")]
+
+
+def gloss_text_units(text: str, glosses: Iterable[str]) -> Iterator[tuple[str, str | None]]:
+    """Выделить самые длинные точные выражения словаря между обычными словами."""
+
+    def normalize(value: str) -> str:
+        return " ".join(value.lower().replace("ё", "е").split()).rstrip(")")
+
+    phrases: dict[str, list[tuple[int, str, str]]] = {}
+    for gloss in sorted(set(glosses)):
+        variants = [gloss]
+        if "(" in gloss and gloss.endswith(")"):
+            plain, note = gloss[:-1].split("(", 1)
+            variants.extend((plain.strip(), f"{plain.strip()} {note}"))
+        for variant in variants:
+            words = split_words(variant)
+            if len(words) > 1:
+                phrases.setdefault(normalize(words[0]), []).append(
+                    (len(words), normalize(variant), gloss)
+                )
+    for candidates in phrases.values():
+        candidates.sort(key=lambda candidate: -candidate[0])
+
+    words = list(_WORD_RE.finditer(text))
+    index = 0
+    while index < len(words):
+        word = words[index]
+        for length, key, gloss in phrases.get(normalize(word.group()), ()):
+            end = index + length
+            if end <= len(words):
+                source = text[word.start() : words[end - 1].end()]
+                if normalize(source) == key:
+                    yield source, gloss
+                    index = end
+                    break
+        else:
+            yield word.group(), None
+            index += 1
 
 
 def is_function_word(value: str) -> bool:
