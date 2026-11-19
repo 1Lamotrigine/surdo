@@ -1,0 +1,26 @@
+<div class="student-sign-modes" data-sign-modes hidden role="group" aria-label="Режим общения">
+  <button type="button" class="button" data-sign-receive aria-pressed="true">Смотреть перевод</button>
+  <button type="button" class="button" data-sign-send aria-pressed="false">Ответить жестами</button>
+</div>
+
+<section class="student-sign" data-sign-panel hidden aria-labelledby="student-sign-title"
+         data-mediapipe-wasm="{{ mediapipe_wasm_path }}"
+         data-mediapipe-model-url="{{ mediapipe_model_url }}">
+  <h2 id="student-sign-title">Ответ жестами</h2>
+  <p>Показывайте по одному жесту. Держите плечи и кисти в кадре, затем нажмите «Распознать жест». Видео обрабатывается в браузере.</p>
+  <p>Доступные жесты: привет, пока, да, хорошо, плохо, вопрос.</p>
+  <video data-sign-video hidden muted playsinline aria-label="Предпросмотр камеры"></video>
+  <div class="student-sign-actions">
+    <button type="button" class="button" data-sign-start>Включить камеру и начать</button>
+    <button type="button" class="button" data-sign-finish hidden>Распознать жест</button>
+    <button type="button" class="button" data-sign-cancel hidden>Отмена</button>
+  </div>
+  <p data-sign-status role="status"></p>
+  <label for="student-sign-text">Русский текст</label>
+  <textarea id="student-sign-text" class="chat-input" data-sign-draft rows="2" maxlength="500"
+            placeholder="Здесь появятся распознанные слова"></textarea>
+  <div class="student-sign-actions">
+    <button type="button" class="button" data-sign-to-chat disabled>Перенести в чат</button>
+    <button type="button" class="button" data-sign-speak hidden disabled>Озвучить</button>
+  </div>
+</section>

@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from config.mediapipe import mediapipe_wasm_path
 from pipeline.queue import submit_text
 from pipeline.services import (
     MAX_UTTERANCE_TEXT_LENGTH,
@@ -325,5 +326,7 @@ def room_student(request: HttpRequest, join_code: str):
             "participant": participant,
             "display_name": participant.display_name if participant else name,
             "avatar_model_url": settings.AVATAR_MODEL_URL,
+            "mediapipe_wasm_path": mediapipe_wasm_path(),
+            "mediapipe_model_url": settings.MEDIAPIPE_HOLISTIC_MODEL_URL,
         },
     )

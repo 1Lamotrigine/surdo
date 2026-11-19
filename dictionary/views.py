@@ -6,9 +6,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.http import FileResponse, Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
-from django.templatetags.static import static
 from django.views.decorators.http import condition, require_http_methods
 
+from config.mediapipe import mediapipe_wasm_path
 from dictionary.models import (
     Language,
     Sign,
@@ -39,21 +39,6 @@ ANIMATION_CONTENT_TYPES = {
     "glb": "model/gltf-binary",
 }
 DEFAULT_ANIMATION_CONTENT_TYPE = "application/octet-stream"
-
-
-def _mediapipe_wasm_path() -> str:
-    """Каталог WASM MediaPipe: Vite dev-сервер или собранная статика.
-
-    В dev-режиме модули и WASM отдаёт Vite (`npm run dev`), в остальных случаях —
-    `static/dist/mediapipe`, куда плагин Vite копирует файлы при сборке.
-    """
-    config = settings.DJANGO_VITE["default"]
-    prefix = config.get("static_url_prefix", "dist")
-    if config.get("dev_mode"):
-        host = config.get("dev_server_host", "localhost")
-        port = config.get("dev_server_port", 5173)
-        return f"http://{host}:{port}/{settings.STATIC_URL.strip('/')}/{prefix}/mediapipe"
-    return static(f"{prefix}/mediapipe")
 
 
 def _get_clip(clip_id: int) -> SignClip | None:
@@ -229,7 +214,7 @@ def record_gesture(request: HttpRequest):
         {
             "model_url": settings.MEDIAPIPE_HOLISTIC_MODEL_URL,
             "avatar_model_url": settings.AVATAR_MODEL_URL,
-            "mediapipe_wasm_path": _mediapipe_wasm_path(),
+            "mediapipe_wasm_path": mediapipe_wasm_path(),
             "languages": Language.choices,
             "word": word,
             "fps": settings.CLIP_DEFAULT_FPS,

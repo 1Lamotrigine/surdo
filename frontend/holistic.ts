@@ -16,6 +16,9 @@ export type HolisticRawResult = {
   faceLandmarks?: unknown;
   leftHandLandmarks?: unknown;
   rightHandLandmarks?: unknown;
+  poseWorldLandmarks?: unknown;
+  leftHandWorldLandmarks?: unknown;
+  rightHandWorldLandmarks?: unknown;
 };
 
 export type HolisticDetectorOptions = {
@@ -164,14 +167,23 @@ export class HolisticDetector {
     return new HolisticDetector(landmarker as unknown as LandmarkerLike);
   }
 
-  /**
-   * Обработать текущий кадр видео. Метка времени должна расти: MediaPipe в
-   * режиме VIDEO выбрасывает кадр с неподходящим временем.
-   */
   detect(video: HTMLVideoElement, timestampMs: number): HolisticFrame {
+    return normalizeHolisticResult(this.detectRaw(video, timestampMs));
+  }
+
+  detectWorld(video: HTMLVideoElement, timestampMs: number): Omit<HolisticFrame, "face"> {
+    const result = this.detectRaw(video, timestampMs);
+    return {
+      pose: normalizeLandmarkSet(result.poseWorldLandmarks),
+      leftHand: normalizeLandmarkSet(result.leftHandWorldLandmarks),
+      rightHand: normalizeLandmarkSet(result.rightHandWorldLandmarks),
+    };
+  }
+
+  private detectRaw(video: HTMLVideoElement, timestampMs: number): HolisticRawResult {
     const timestamp = Math.max(Math.round(timestampMs), this.lastTimestamp + 1);
     this.lastTimestamp = timestamp;
-    return normalizeHolisticResult(this.landmarker.detectForVideo(video, timestamp));
+    return this.landmarker.detectForVideo(video, timestamp);
   }
 
   dispose(): void {

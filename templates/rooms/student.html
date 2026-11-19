@@ -15,8 +15,7 @@
       <p class="eyebrow">Комната {{ room.join_code }}</p>
       <h1>{{ room.title }}</h1>
       <p class="lead">
-        Вы вошли как <strong>{{ display_name }}</strong>. Распознанный текст
-        появляется сразу, а аватар показывает жесты.
+        Вы вошли как <strong>{{ display_name }}</strong>.
       </p>
       <p class="socket-status" data-socket-status data-state="loading" aria-live="polite">
         Подключение…
@@ -29,7 +28,11 @@
       </p>
     </header>
 
-    <div class="student-stage" aria-label="Область аватара и субтитров">
+    {% if room.lang == "ru" %}
+      {% include "rooms/_student_sign.html" %}
+    {% endif %}
+
+    <div class="student-stage" data-receive-panel aria-label="Область аватара и субтитров">
       <div class="avatar-stage" data-room-avatar-stage></div>
       <p class="student-live-caption" data-room-live-caption hidden aria-live="polite"></p>
       <div
@@ -44,7 +47,7 @@
 
     {# C8: лента расшифровки. Свежие фразы сверху, чтобы студент сразу видел
        последнее сказанное и мог перечитать пропущенное прокруткой вниз. #}
-    <section class="student-transcript-section" aria-labelledby="transcript-title">
+    <section class="student-transcript-section" data-receive-panel aria-labelledby="transcript-title">
       <h2 id="transcript-title">Расшифровка речи</h2>
       <p class="student-transcript-hint">
         Новые фразы появляются сверху. Прокрутите ниже, чтобы перечитать сказанное.

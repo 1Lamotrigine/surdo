@@ -10,6 +10,7 @@ import {
   setupMicrophone,
   type MicrophoneController,
 } from "./microphone";
+import { setupStudentSign } from "./student-sign";
 import { InstallPrompt } from "./install-prompt";
 import {
   ScreenNotifier,
@@ -243,7 +244,10 @@ export function setupRoomLive(root: HTMLElement): void {
     );
   };
 
+  const disposeStudentSign = setupStudentSign(root);
+
   const stopStudentFeatures = (): void => {
+    disposeStudentSign?.();
     void wakeLock?.disable();
     if (wakeLock?.supported) setWakeLockStatus("Удержание экрана снято.", "off");
     notifier?.clear();
@@ -485,6 +489,7 @@ export function setupRoomLive(root: HTMLElement): void {
     socket.addEventListener("close", (event: CloseEvent) => {
       window.clearInterval(pingTimer);
       if (closed || NON_RETRYABLE_CODES.has(event.code)) {
+        disposeStudentSign?.();
         setStatus(closed ? status?.textContent ?? "Комната недоступна" : "Нет доступа к комнате", "error");
         return;
       }
@@ -516,6 +521,7 @@ export function setupRoomLive(root: HTMLElement): void {
       window.clearInterval(pingTimer);
       void wakeLock?.disable();
       notifier?.dispose();
+      disposeStudentSign?.();
       void microphone?.dispose();
       phrasePlayer?.then((player) => player.dispose()).catch(() => undefined);
       phrasePlayer = null;
