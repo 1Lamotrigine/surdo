@@ -21,7 +21,7 @@ services:
     environment:
       POSTGRES_DB: app
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?добавьте DB_PASSWORD в .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -53,11 +53,18 @@ services:
     container_name: gluho-nemye-django-web
     restart: unless-stopped
     # Один процесс: очереди фраз и presence живут в памяти процесса (ТЗ 5.7).
-    command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 1
-    env_file: .env
+    command: sh scripts/start-web.sh
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Модель Whisper грузится (при пустом кэше — скачивается) на старте в
       # фоне: первая фраза не платит за это и не упирается в ASR_TIMEOUT.
+      DATABASE_URL: ${DATABASE_URL:-postgres://app:${DB_PASSWORD:-change-me}@db:5432/app}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DJANGO_VITE_DEV_MODE: "False"
+      AVATAR_MODEL_URL: ${AVATAR_MODEL_URL:-/static/models/surd.vrm}
+      MEDIAPIPE_HOLISTIC_MODEL_URL: ${MEDIAPIPE_HOLISTIC_MODEL_URL:-/static/models/holistic_landmarker.task}
       ASR_WARMUP: "1"
     depends_on:
       db:

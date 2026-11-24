@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { decodeClip, pointAt, type DecodedClip } from "./clip";
+import { pointAt, type DecodedClip } from "./clip";
 import type { HolisticFrame, Landmark } from "./skeleton";
 
 type SignFrame = Omit<HolisticFrame, "face">;
@@ -86,7 +86,12 @@ function sequenceDistance(a: Features[], b: Features[]): number {
 export function recognizeSign(frames: Features[], references: SignReference[]): string | null {
   if (frames.filter((frame) => frame.hands.some(Boolean)).length < MIN_FRAMES) return null;
   const observed = sample(frames);
-  const [best, runnerUp] = references
+  const shortlist = references.map((reference) => ({
+    reference,
+    score: [2, 7, 12, 17].reduce((sum, index) =>
+      sum + frameDistance(observed[index], reference.frames[index]), 0),
+  })).sort((a, b) => a.score - b.score).slice(0, 24);
+  const [best, runnerUp] = shortlist.map((item) => item.reference)
     .map((reference) => ({ text: reference.text, score: sequenceDistance(observed, reference.frames) }))
     .sort((a, b) => a.score - b.score);
   if (!best || best.score > MAX_DISTANCE || (runnerUp && runnerUp.score - best.score < MIN_MARGIN)) {
@@ -118,12 +123,8 @@ export function referenceFromClip(clip: DecodedClip): SignReference {
 }
 
 export async function loadSignReferences(signal?: AbortSignal): Promise<SignReference[]> {
-  const urls = import.meta.glob<string>("./sign-references/*.json.gz", {
-    eager: true, query: "?url&no-inline", import: "default",
-  });
-  return Promise.all(Object.values(urls).map(async (url) => {
-    const response = await fetch(url, { signal });
-    if (!response.ok) throw new Error("Не удалось загрузить эталоны жестов.");
-    return referenceFromClip(await decodeClip(await response.arrayBuffer()));
-  }));
+  const response = await fetch(new URL("./sign-references/library.gz", import.meta.url), { signal });
+  if (!response.ok || !response.body) throw new Error("Не удалось загрузить словарь жестов.");
+  const stream = response.body.pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).json();
 }

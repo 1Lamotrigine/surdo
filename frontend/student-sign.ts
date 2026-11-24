@@ -70,19 +70,20 @@ export function setupStudentSign(root: HTMLElement): (() => void) | null {
   };
 
   receive.addEventListener("click", () => setMode(false));
-  send.addEventListener("click", () => setMode(true));
+  send.addEventListener("click", () => { setMode(true); if (!session) start.click(); });
   draft.addEventListener("input", syncDraft);
   toChat.addEventListener("click", () => {
-    const text = [chat.value.trim(), draft.value.trim()].filter(Boolean).join(" ");
-    if (text.length > chat.maxLength) {
-      status.textContent = "Текст не помещается в одно сообщение. Сократите черновик или отправьте текст, который уже в чате.";
-      return;
+    const previous = chat.value;
+    chat.value = draft.value.trim();
+    chat.form?.requestSubmit();
+    if (!chat.value) {
+      draft.value = "";
+      syncDraft();
+      status.textContent = "Сообщение передано в чат.";
+    } else {
+      status.textContent = "Нет соединения с чатом. Повторите отправку.";
     }
-    chat.value = text;
-    draft.value = "";
-    syncDraft();
-    status.textContent = "Текст перенесён в чат. Проверьте его и нажмите «Отправить».";
-    chat.focus();
+    chat.value = previous;
   });
 
   speak.addEventListener("click", () => {
@@ -120,21 +121,6 @@ export function setupStudentSign(root: HTMLElement): (() => void) | null {
     cancel.hidden = false;
     status.textContent = "Загрузка распознавания…";
     try {
-      const [{ HolisticDetector }, recognition] = await Promise.all([
-        import("./holistic"), import("./sign-recognition"),
-      ]);
-      const library = references ?? await recognition.loadSignReferences(signal);
-      if (signal.aborted) return;
-      references = library;
-      const model = detector ?? await HolisticDetector.create({
-        wasmBasePath: panel.dataset.mediapipeWasm ?? "",
-        modelUrl: panel.dataset.mediapipeModelUrl ?? "",
-      });
-      if (signal.aborted) {
-        model.dispose();
-        return;
-      }
-      detector = model;
       status.textContent = "Ожидание доступа к камере…";
       const camera = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -150,10 +136,30 @@ export function setupStudentSign(root: HTMLElement): (() => void) | null {
       await video.play();
       if (signal.aborted) return;
 
+      const [{ HolisticDetector }, recognition] = await Promise.all([
+        import("./holistic"), import("./sign-recognition"),
+      ]);
+      const library = references ?? await recognition.loadSignReferences(signal);
+      if (signal.aborted) return;
+      references = library;
+      const model = detector ?? await HolisticDetector.create({
+        wasmBasePath: panel.dataset.mediapipeWasm ?? "",
+        modelUrl: panel.dataset.mediapipeModelUrl ?? "",
+      });
+      if (signal.aborted) {
+        model.dispose();
+        return;
+      }
+      detector = model;
       const frames: NonNullable<ReturnType<typeof signFeatures>>[] = [];
+      let startedAt = 0;
+      let lastHandAt = 0;
+      let waitForPause = false;
       complete = () => {
-        stopCapture();
-        const result = recognition.recognizeSign(frames, library);
+        if (!frames.length) return;
+        const result = recognition.recognizeSign(frames.splice(0), library);
+        startedAt = 0;
+        waitForPause = true;
         if (!result) {
           status.textContent = "Жест не удалось уверенно распознать. Попробуйте ещё раз или введите текст.";
           return;
@@ -168,21 +174,27 @@ export function setupStudentSign(root: HTMLElement): (() => void) | null {
         status.textContent = `Распознано: «${result}». Проверьте текст перед отправкой.`;
       };
 
-      const startedAt = performance.now();
+
       let lastVideoTime = -1;
       finish.hidden = false;
-      status.textContent = "Покажите один жест и нажмите «Распознать жест». Запись длится до 5 секунд.";
+      status.textContent = "Покажите жест и уберите руки из кадра для следующего слова.";
       timer = window.setInterval(() => {
         const now = performance.now();
-        if (now - startedAt >= RECORDING_LIMIT_MS) {
-          complete?.();
-          return;
-        }
+
         if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.currentTime === lastVideoTime) return;
         lastVideoTime = video.currentTime;
         try {
           const frame = recognition.signFeatures(model.detectWorld(video, now));
-          if (frame) frames.push(frame);
+          if (frame?.hands.some(Boolean)) {
+            if (waitForPause) return;
+            if (!startedAt) startedAt = now;
+            lastHandAt = now;
+            frames.push(frame);
+            if (now - startedAt >= RECORDING_LIMIT_MS) complete?.();
+          } else if (now - lastHandAt >= 350) {
+            complete?.();
+            waitForPause = false;
+          }
         } catch {
           stopCapture();
           detector?.dispose();
